@@ -4,6 +4,10 @@ import sys
 import argparse
 from pathlib import Path
 from loguru import logger
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Import our modular components
 from src.data_processing.load_road_network import RoadNetworkLoader
@@ -136,11 +140,20 @@ def main():
     parser.add_argument("--output", default="output", help="Output directory")
     parser.add_argument("--osrm-url", default="http://router.project-osrm.org", help="OSRM server URL")
     parser.add_argument("--api", action="store_true", help="Start FastAPI server instead")
-    parser.add_argument("--port", type=int, default=8081, help="Port for FastAPI server (default: 8081)")
+    parser.add_argument("--port", type=int, default=8001, help="Port for FastAPI server (default: 8081)")
     
     args = parser.parse_args()
     
     if args.api:
+        # Refresh token before starting API server
+        from src.services.auth_service import AuthService
+        auth_service = AuthService()
+        logger.info("🔑 Refreshing authentication token...")
+        if auth_service.refresh_token():
+            logger.success("✅ Token refreshed successfully")
+        else:
+            logger.warning("⚠️ Token refresh failed, using existing token")
+        
         # Start FastAPI server
         import uvicorn
         from src.api.geospatial_routes import app

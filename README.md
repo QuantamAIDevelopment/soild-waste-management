@@ -1,36 +1,52 @@
 # Intelligent Garbage Collection Route Assignment System
 
-A production-ready Python system for optimizing garbage collection routes using agent-driven architecture, clustering, and VRP solving.
+A production-ready Python system for optimizing garbage collection routes using geospatial AI, clustering algorithms, and VRP solving with live vehicle data integration.
 
 ## Features
 
-- **Multi-file Input Processing**: Supports Ward Boundaries, Road Network, Houses (GeoJSON) and Vehicles (CSV)
-- **Intelligent Route Optimization**: Uses KMeans clustering and OR-Tools VRP solver
-- **Non-overlapping Routes**: Ensures each road segment is assigned to exactly one vehicle
-- **Dynamic Reassignment**: Handles vehicle unavailability with automatic route redistribution
-- **PostGIS Storage**: Persists route geometries and data
-- **Interactive Visualization**: Folium-based web preview and GeoJSON API
-- **RESTful API**: OpenAPI/Swagger interface for all operations
+- **Live Vehicle Integration**: Real-time vehicle data from SWM API with automatic authentication
+- **Ward-based Filtering**: Filter vehicles by ward number for targeted route optimization
+- **Capacity-based Optimization**: Multi-trip assignment based on vehicle capacity constraints
+- **Interactive Route Maps**: Folium-based maps with cluster controls and trip visualization
+- **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
+- **Automatic Scheduling**: Daily vehicle data fetch at 5:30 AM with APScheduler
+- **RESTful API**: FastAPI with OpenAPI/Swagger documentation
+- **Geospatial Processing**: NetworkX graphs, GeoPandas, and spatial clustering
 
 ## Architecture
 
 ```
 ├── src/
-│   ├── agents/            # Route assignment logic
-│   ├── api/               # FastAPI endpoints
+│   ├── api/               # FastAPI endpoints and route handlers
+│   │   ├── geospatial_routes.py  # Main optimization API
+│   │   ├── vehicles_api.py       # Vehicle management endpoints
+│   │   └── auth_endpoints.py     # Authentication endpoints
 │   ├── clustering/        # Building clustering and trip assignment
+│   │   ├── assign_buildings.py   # KMeans/DBSCAN clustering
+│   │   └── trip_assignment.py    # Capacity-based trip planning
 │   ├── configurations/    # System configuration
-│   ├── core/              # Blackboard coordination system
-│   ├── data_processing/   # Road network and building processing
-│   ├── models/            # Data models
+│   │   └── config.py             # Environment and app settings
+│   ├── data_processing/   # Geospatial data processing
+│   │   ├── load_road_network.py  # Road network graph building
+│   │   └── snap_buildings.py     # Building-to-road snapping
 │   ├── routing/           # Route computation and optimization
-│   ├── services/          # Vehicle service and API integration
-│   ├── storage/           # PostGIS integration
-│   ├── tools/             # Road snapping and VRP solving
+│   │   ├── capacity_optimizer.py # Capacity-based optimization
+│   │   ├── compute_routes.py     # OR-Tools VRP solver
+│   │   └── get_osrm_directions.py # OSRM turn-by-turn directions
+│   ├── services/          # External service integration
+│   │   ├── vehicle_service.py    # Live vehicle API integration
+│   │   ├── auth_service.py       # JWT token management
+│   │   └── scheduler_service.py  # Daily scheduling service
+│   ├── tools/             # Utility tools and algorithms
+│   │   ├── road_snapper.py       # Road network snapping
+│   │   ├── vrp_solver.py         # VRP optimization
+│   │   └── osrm_routing.py       # OSRM routing utilities
 │   └── visualization/     # Map generation and export
+│       ├── folium_map.py         # Interactive map generation
+│       └── export_to_geojson.py  # GeoJSON export utilities
 ├── tests/                 # Unit and integration tests
-├── output/                # Generated maps and results
-└── main.py               # Main entry point
+├── output/                # Generated maps and results (auto-created)
+└── main.py               # CLI and API entry point
 ```
 
 ## Quick Start
@@ -38,28 +54,42 @@ A production-ready Python system for optimizing garbage collection routes using 
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL with PostGIS extension
 - Git
+- Internet connection for OSRM routing and live vehicle data
 
 ### Installation
 
 1. Clone and setup:
 ```bash
 git clone <repository>
-cd waste
+cd Solid_waste_management
 pip install -r requirements.txt
 ```
 
-2. Configure database:
+2. Configure environment variables in `.env`:
 ```bash
-# Set environment variable
-export DATABASE_URL="postgresql://user:password@localhost:5432/waste_db"
+# SWM API Configuration
+SWM_API_BASE_URL=https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.azurewebsites.net
+SWM_USERNAME=your_username
+SWM_PASSWORD=your_password
+
+# Optional: External upload URL for route data
+EXTERNAL_UPLOAD_URL=your_external_api_url
+SWM_TOKEN=your_jwt_token
+
+# API Security
+API_KEY=swm-2024-secure-key
 ```
 
-3. Run the system:
+3. Run the API server:
 ```bash
 python main.py --api --port 8081
 ```
+
+**Automatic Features**:
+- Vehicle data fetched daily at 5:30 AM
+- JWT token auto-refresh
+- Interactive maps with cluster controls
 
 Or run CLI mode:
 ```bash
@@ -70,9 +100,17 @@ The API will be available at `http://localhost:8081` with Swagger UI at `http://
 
 ## API Usage
 
+### Authentication
+All endpoints require Bearer token authentication:
+```bash
+# Add to all requests
+-H "Authorization: Bearer swm-2024-secure-key"
+```
+
 ### 1. Upload Files and Optimize Routes
 ```bash
 curl -X POST "http://localhost:8081/optimize-routes" \
+  -H "Authorization: Bearer swm-2024-secure-key" \
   -F "roads_file=@roads.geojson" \
   -F "buildings_file=@buildings.geojson" \
   -F "ward_geojson=@ward.geojson" \
@@ -82,7 +120,8 @@ curl -X POST "http://localhost:8081/optimize-routes" \
 
 ### 2. Get Cluster Roads with Coordinates
 ```bash
-curl "http://localhost:8081/cluster/0"
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/cluster/0"
 ```
 
 **Response:**
@@ -90,10 +129,10 @@ curl "http://localhost:8081/cluster/0"
 {
   "cluster_id": 0,
   "vehicle_info": {
-    "vehicle_id": "V001",
-    "vehicle_type": "truck",
+    "vehicle_id": "SWM001",
+    "vehicle_type": "garbage_truck",
     "status": "active",
-    "capacity": 1000
+    "capacity": 500
   },
   "buildings_count": 15,
   "roads": [
@@ -113,16 +152,76 @@ curl "http://localhost:8081/cluster/0"
 }
 ```
 
-### 3. Get Live Vehicle Data
+### 3. Get Route Coordinates with Timestamps
 ```bash
-curl "http://localhost:8081/api/vehicles/live"
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/cluster-routes"
 ```
 
-### 4. View Interactive Maps
-- Route Map: `http://localhost:8081/generate-map`
+### 4. Live Vehicle Data
+```bash
+# All vehicles
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/vehicles/live"
 
-### 5. API Documentation
-Swagger UI: `http://localhost:8081/docs`
+# Vehicles by ward
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/vehicles/ward/1"
+```
+
+### 5. Scheduler Management
+```bash
+# Check scheduler status
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/scheduler/status"
+
+# Manually trigger vehicle fetch
+curl -X POST -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/scheduler/trigger"
+```
+
+### 6. Interactive Maps
+- Route Map: `http://localhost:8081/generate-map`
+- API Documentation: `http://localhost:8081/docs`
+
+## Automatic Scheduling
+
+### Daily Vehicle Data Fetch
+The system automatically fetches vehicle data at **5:30 AM daily** using APScheduler:
+
+- **Automatic Start**: Scheduler starts with FastAPI server
+- **JWT Token Management**: Automatic token refresh before data fetch
+- **Data Storage**: Saves to `output/vehicles_daily_YYYYMMDD_HHMMSS.csv`
+- **Logging**: Timestamped logs for every scheduled run
+- **Error Handling**: Fallback to cached data if API fails
+
+### Scheduler Endpoints
+| Endpoint | Method | Description |
+|----------|--------|--------------|
+| `/scheduler/status` | GET | Check scheduler status and next run time |
+| `/scheduler/trigger` | POST | Manually trigger vehicle data fetch |
+| `/scheduler/start` | POST | Start scheduler if stopped |
+| `/scheduler/stop` | POST | Stop scheduler |
+
+### Authentication Management
+```bash
+# Check token status
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/auth/token/info"
+
+# Force token refresh
+curl -X POST -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/auth/token/refresh"
+```
+
+### Testing Scheduler
+```bash
+# Run test script
+python test_scheduler.py
+
+# Check output files
+dir output\vehicles_daily_*.csv
+```
 
 ## Input File Formats
 
@@ -150,7 +249,7 @@ Swagger UI: `http://localhost:8081/docs`
 }
 ```
 
-### Houses (GeoJSON)
+### Buildings/Houses (GeoJSON)
 ```json
 {
   "type": "FeatureCollection",
@@ -162,34 +261,40 @@ Swagger UI: `http://localhost:8081/docs`
 }
 ```
 
-### Vehicles (CSV)
+### Vehicles (CSV - Optional)
 ```csv
-vehicle_id,vehicle_type,ward_no,driver_info,status,start_location
-V001,truck,1,John Doe,active,"12.34,56.78"
-V002,truck,1,Jane Smith,unavailable,
+vehicle_id,vehicle_type,ward_no,status,capacity,driverName
+SWM001,garbage_truck,1,active,500,Driver1
+SWM002,garbage_truck,1,active,500,Driver2
 ```
+
+**Note**: Vehicle data is automatically fetched from live SWM API. CSV upload is optional for testing.
 
 ## Algorithm Details
 
-### 1. Preprocessing
-- Reprojects all spatial data to EPSG:3857 (Web Mercator)
-- Snaps houses to nearest road segments
-- Builds routable graph from road network
+### 1. Data Processing Pipeline
+- **CRS Conversion**: EPSG:4326 (WGS84) for display, EPSG:3857 (Web Mercator) for calculations
+- **Building Snapping**: Snap buildings to nearest road network nodes
+- **Graph Construction**: NetworkX graph from road network for routing
+- **Live Data Integration**: Real-time vehicle data with authentication
 
-### 2. Clustering
-- Uses KMeans with k = number of active vehicles
-- Assigns clusters to vehicles based on proximity
-- Ensures road segments belong to single clusters
+### 2. Capacity-based Clustering
+- **Vehicle Filtering**: Active vehicles only (status: ACTIVE/AVAILABLE/ONLINE)
+- **KMeans Clustering**: k = number of active vehicles
+- **Trip Assignment**: Multiple trips per vehicle based on capacity (500 houses/trip)
+- **Ward Filtering**: Vehicles filtered by ward number for targeted optimization
 
 ### 3. Route Optimization
-- Builds VRP distance matrix using road network shortest paths
-- Solves using OR-Tools with distance minimization objective
-- Generates ordered route polylines following road geometry
+- **VRP Solver**: OR-Tools with capacity constraints and time limits
+- **Distance Matrix**: NetworkX shortest paths on road network
+- **Multi-trip Support**: Up to 3 trips per vehicle per day
+- **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
 
-### 4. Conflict Resolution
-- Detects overlapping road segments between routes
-- Reassigns disputed segments to minimize cost increase
-- Rebuilds affected routes
+### 4. Interactive Visualization
+- **Folium Maps**: Color-coded routes with cluster controls
+- **Layer Management**: Show/hide individual trips and clusters
+- **Route Details**: Start/end markers, directional arrows, trip statistics
+- **Dashboard Panel**: Trip summary with toggle controls
 
 ## Testing
 
@@ -209,20 +314,33 @@ Edit `src/configurations/config.py`:
 
 ```python
 class Config:
-    DATABASE_URL = "postgresql://user:pass@localhost:5432/waste_db"
-    TARGET_CRS = "EPSG:3857"
-    RANDOM_SEED = 42
+    # Spatial reference systems
+    TARGET_CRS = "EPSG:3857"  # Web Mercator for calculations
+    
+    # Vehicle capacity settings
+    HOUSES_PER_VEHICLE_PER_TRIP = 500
+    MAX_TRIPS_PER_DAY = 3
+    
+    # VRP solver settings
     VRP_TIME_LIMIT_SECONDS = 30
-    API_HOST = "0.0.0.0"
-    API_PORT = 8000
+    VRP_VEHICLE_CAPACITY = 999999  # Effectively infinite
+    
+    # API settings
+    API_HOST = "127.0.0.1"
+    API_PORT = 8080
+    
+    # Deterministic results
+    RANDOM_SEED = 42
 ```
 
 ## Performance
 
-- Optimized for ward sizes up to several thousand houses
-- Uses clustering to limit VRP problem size
-- Deterministic results with configurable random seed
-- Reasonable performance through spatial indexing
+- **Scalability**: Optimized for ward sizes up to several thousand houses
+- **Clustering Efficiency**: KMeans clustering limits VRP problem size
+- **Spatial Indexing**: GeoPandas spatial operations for fast nearest neighbor queries
+- **Caching**: JWT token caching and session reuse for API calls
+- **Deterministic Results**: Configurable random seed for reproducible optimization
+- **Memory Management**: Automatic cleanup of temporary files and maps
 
 ## Logging
 
@@ -237,12 +355,51 @@ The system provides comprehensive logging:
 
 ```dockerfile
 FROM python:3.11-slim
+
+# Install system dependencies for geospatial libraries
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
 COPY . .
-CMD ["python", "main.py"]
+EXPOSE 8081
+
+# Run API server by default
+CMD ["python", "main.py", "--api", "--port", "8081"]
 ```
+
+### Docker Compose
+```yaml
+version: '3.8'
+services:
+  swm-optimizer:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      - SWM_API_BASE_URL=${SWM_API_BASE_URL}
+      - SWM_USERNAME=${SWM_USERNAME}
+      - SWM_PASSWORD=${SWM_PASSWORD}
+      - API_KEY=${API_KEY}
+    volumes:
+      - ./output:/app/output
+```
+
+## Key Features Summary
+
+- 🌐 **Live Vehicle Integration**: Real-time SWM API with JWT authentication
+- 🗺️ **Interactive Maps**: Folium-based visualization with cluster controls
+- 🚛 **Capacity Optimization**: Multi-trip assignment based on vehicle capacity
+- 📍 **OSRM Routing**: Real-world driving directions and navigation
+- ⏰ **Automatic Scheduling**: Daily data fetch at 5:30 AM
+- 🔐 **Secure API**: Bearer token authentication for all endpoints
+- 📊 **Ward-based Filtering**: Target specific wards for optimization
+- 🎯 **Geospatial AI**: NetworkX graphs, spatial clustering, and VRP solving
 
 ## License
 

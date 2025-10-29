@@ -151,17 +151,36 @@ cython_debug/
 ehthumbs.db
 Thumbs.db
 
-# Project specific
-*.geojson
-*.csv
+# Project specific - Waste Management System
+output/
+results/
 uploads/
 temp/
 logs/
+
+# Generated files
+*.html
+route_map.html
+cluster_analysis.html
+routes.geojson
+summary.csv
+vehicles_daily_*.csv
+
+# Database files
 *.db
 *.sqlite
-output/
-*.html
-*.json
+
+# API data and cache
+api_cache/
+token_cache.json
+
+# Input data (uncomment if you want to ignore input files)
+# *.geojson
+# *.csv
+# ward_boundaries.geojson
+# road_network.geojson
+# houses.geojson
+# vehicles.csv
 
 # Docker
 .dockerignore

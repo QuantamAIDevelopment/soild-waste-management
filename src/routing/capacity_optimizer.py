@@ -23,7 +23,7 @@ class CapacityRouteOptimizer:
         ].copy()
         
         if len(active_vehicles) == 0:
-            raise ValueError("No active vehicles found")
+            raise ValueError("No active vehicles available for route optimization. Please ensure vehicles are active in the specified ward.")
         
         # Get building centroids with proper CRS handling
         buildings_projected = buildings_gdf.to_crs('EPSG:3857')  # Web Mercator for accurate distance

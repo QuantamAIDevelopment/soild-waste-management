@@ -5,6 +5,7 @@ import pandas as pd
 from typing import List, Dict, Optional
 from loguru import logger
 from dotenv import load_dotenv
+from .auth_service import AuthService
 
 # Load environment variables
 load_dotenv()
@@ -13,21 +14,20 @@ class VehicleService:
     def __init__(self):
         self.base_url = os.getenv('SWM_API_BASE_URL', 'https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.azurewebsites.net')
         self.api_key = os.getenv('SWM_API_KEY', '')
-        self.username = os.getenv('SWM_USERNAME', '')
-        self.password = os.getenv('SWM_PASSWORD', '')
-        self.token = os.getenv('SWM_TOKEN', '')
         self.session = requests.Session()
-        self.auth_token = None
+        self.auth_service = AuthService()
         
         logger.info(f"VehicleService initialized with base URL: {self.base_url}")
-        logger.info(f"Auth available: {'API Key' if self.api_key else ''} {'Username/Password' if self.username and self.password else ''} {'Token' if self.token else ''}")
+        logger.info("Using automatic token management")
     
     def get_live_vehicles(self) -> pd.DataFrame:
         """Fetch live vehicle data from SWM API."""
         try:
-            # Get fresh token if needed
-            if not self.token and self.username and self.password:
-                self.auth_token = self._get_login_token()
+            # Get valid token (automatically refreshes if needed)
+            token = self.auth_service.get_valid_token()
+            if not token:
+                logger.error("Could not get valid authentication token")
+                return self._create_fallback_vehicles()
             
             # Use the correct vehicle endpoint with pagination
             from datetime import datetime
@@ -38,15 +38,10 @@ class VehicleService:
             
             logger.info(f"Fetching vehicles from: {url}")
             
-            # Use bearer token
-            headers = {'accept': '*/*'}
-            token_to_use = self.token if self.token else self.auth_token
-            
-            if token_to_use:
-                headers['Authorization'] = f'Bearer {token_to_use}'
-                logger.info("Using bearer token")
-            else:
-                logger.warning("No bearer token available")
+            headers = {
+                'accept': '*/*',
+                'Authorization': f'Bearer {token}'
+            }
             
             response = requests.get(url, headers=headers, timeout=30)
             
@@ -54,11 +49,25 @@ class VehicleService:
                 vehicles_data = response.json()
                 logger.success(f"Successfully fetched vehicle data")
                 return self._process_vehicle_data(vehicles_data)
+            elif response.status_code == 401:
+                # Token might be invalid, try to refresh
+                logger.warning("Token appears invalid, attempting refresh...")
+                if self.auth_service.refresh_token():
+                    # Retry with new token
+                    new_token = self.auth_service.get_valid_token()
+                    if new_token:
+                        headers['Authorization'] = f'Bearer {new_token}'
+                        response = requests.get(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            vehicles_data = response.json()
+                            logger.success(f"Successfully fetched vehicle data after token refresh")
+                            return self._process_vehicle_data(vehicles_data)
+                
+                logger.error(f"Authentication failed even after token refresh")
+                return self._create_fallback_vehicles()
             else:
                 logger.error(f"API returned status {response.status_code}: {response.text[:200]}")
                 return self._create_fallback_vehicles()
-            
-
             
         except Exception as e:
             logger.error(f"Error fetching live vehicle data: {e}")
@@ -81,16 +90,17 @@ class VehicleService:
                         logger.info(f"Found {len(filtered_vehicles)} vehicles in ward {ward_no} using field '{field}'")
                         break
             
-            # If no ward field found or no matches, return active vehicles
+            # If no ward field found or no matches, return empty DataFrame
             if filtered_vehicles is None or len(filtered_vehicles) == 0:
-                logger.warning(f"No ward field found or no vehicles in ward {ward_no}, using all active vehicles")
-                filtered_vehicles = all_vehicles[all_vehicles['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])]
+                logger.warning(f"No vehicles found in ward {ward_no}")
+                # Return empty DataFrame with same structure
+                return pd.DataFrame(columns=all_vehicles.columns)
             
             return filtered_vehicles
             
         except Exception as e:
             logger.error(f"Error filtering vehicles by ward {ward_no}: {e}")
-            return self._create_fallback_vehicles()
+            return self._create_fallback_vehicles(ward_no)
     
     def _get_auth_methods(self):
         """Get all possible authentication methods to try."""
@@ -119,46 +129,7 @@ class VehicleService:
         
         return methods
     
-    def _get_login_token(self):
-        """Get authentication token via login."""
-        try:
-            url = f"{self.base_url}/auth/login"
-            login_data = {
-                'loginId': self.username,
-                'password': self.password
-            }
-            
-            headers = {
-                'accept': 'application/json',
-                'Content-Type': 'application/json'
-            }
-            
-            logger.info(f"Attempting login to {url}")
-            response = requests.post(url, json=login_data, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                logger.success(f"Login successful")
-                
-                # Look for token in various fields
-                token_fields = ['token', 'access_token', 'accessToken', 'authToken', 'jwt', 'bearerToken']
-                for field in token_fields:
-                    if field in data:
-                        logger.success(f"Got auth token")
-                        return data[field]
-                    elif isinstance(data, dict) and 'data' in data and isinstance(data['data'], dict) and field in data['data']:
-                        logger.success(f"Got auth token from data")
-                        return data['data'][field]
-                
-                logger.warning(f"Token not found. Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not dict'}")
-                return None
-            else:
-                logger.error(f"Login failed with status {response.status_code}: {response.text}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Login error: {e}")
-            return None
+
     
     def _process_vehicle_data(self, vehicles_data) -> pd.DataFrame:
         """Process and standardize vehicle data from API response."""
@@ -251,9 +222,14 @@ class VehicleService:
         
         return df
     
-    def _create_fallback_vehicles(self) -> pd.DataFrame:
+    def _create_fallback_vehicles(self, ward_no: str = None) -> pd.DataFrame:
         """Create fallback vehicle data when API is unavailable."""
         logger.warning("Creating fallback vehicle data")
+        
+        # If specific ward requested and it's not ward 1, return empty DataFrame
+        if ward_no and str(ward_no) != '1':
+            logger.warning(f"No fallback vehicles available for ward {ward_no}")
+            return pd.DataFrame()
         
         fallback_data = [
             {'vehicle_id': 'SWM001', 'vehicleId': 'SWM001', 'vehicleNo': 'SWM001', 'driverName': 'Driver1', 'imeiN': '123456789', 'phoneNo': '9876543210', 'wardNo': '1', 'vehicleType': 'garbage_truck', 'department': 'SWM', 'timestamp': '2024-01-01T00:00:00Z', 'status': 'active', 'capacity': 500},

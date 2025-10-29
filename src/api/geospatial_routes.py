@@ -20,10 +20,15 @@ from shapely.geometry import Point
 from scipy.spatial.distance import cdist
 import math
 from src.services.vehicle_service import VehicleService
+from src.services.scheduler_service import SchedulerService
 from src.api.vehicles_api import router as vehicles_router
+from src.api.auth_endpoints import router as auth_router
 from src.routing.capacity_optimizer import CapacityRouteOptimizer
+
 from loguru import logger
 import warnings
+import requests
+from dotenv import load_dotenv
 
 # Suppress specific geographic CRS warnings for intentional lat/lon usage in maps
 warnings.filterwarnings('ignore', message='.*Geometry is in a geographic CRS.*')
@@ -56,15 +61,23 @@ app = FastAPI(
         {
             "name": "maps",
             "description": "Map generation and visualization"
+        },
+        {
+            "name": "scheduler",
+            "description": "Automatic daily scheduling operations"
         }
     ]
 )
 
-# Initialize vehicle service
+# Initialize services
 vehicle_service = VehicleService()
+scheduler_service = SchedulerService()
 
 # Include vehicle API routes
 app.include_router(vehicles_router)
+
+# Include authentication API routes
+app.include_router(auth_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -74,6 +87,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Start the SWM Agent with automatic daily scheduling."""
+    logger.info("🚀 Starting SWM Agent...")
+    scheduler_service.start_scheduler()
+    logger.success("✅ SWM Agent startup complete (daily scheduler enabled)")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the SWM Agent."""
+    logger.info("🛑 Shutting down SWM Agent...")
+    if scheduler_service.is_running:
+        scheduler_service.stop_scheduler()
+    logger.info("✅ SWM Agent shutdown complete")
 
 def safe_argmin(distances):
     """Safely get argmin, handling empty sequences."""
@@ -100,7 +129,8 @@ async def optimize_routes(
     roads_file: UploadFile = File(..., description="Roads GeoJSON file"),
     buildings_file: UploadFile = File(..., description="Buildings GeoJSON file"), 
     ward_geojson: UploadFile = File(..., description="Ward boundary GeoJSON file"),
-    ward_no: str = Form(..., description="Ward number to filter vehicles")
+    ward_no: str = Form(..., description="Ward number to filter vehicles"),
+    vehicles_csv: UploadFile = File(None, description="Optional vehicles CSV file (uses live API if not provided)")
 ):
     """Upload files and run complete route optimization pipeline."""
     
@@ -137,20 +167,38 @@ async def optimize_routes(
             if roads_gdf.crs != 'EPSG:4326':
                 roads_gdf = roads_gdf.to_crs('EPSG:4326')
             
-            # Get vehicle data from live API
+            # Get vehicle data from CSV file or live API
             try:
-                # Use live API data filtered by ward
-                vehicles_df = vehicle_service.get_vehicles_by_ward(ward_no.strip())
-                print(f"Loaded {len(vehicles_df)} vehicles for ward {ward_no}")
+                if vehicles_csv and vehicles_csv.filename:
+                    # Use uploaded CSV file
+                    vehicles_csv_path = os.path.join(temp_dir, "vehicles.csv")
+                    with open(vehicles_csv_path, "wb") as f:
+                        shutil.copyfileobj(vehicles_csv.file, f)
+                    vehicles_df = pd.read_csv(vehicles_csv_path)
+                    vehicles_path = vehicles_csv_path
+                    vehicle_source = "Uploaded CSV File"
+                    print(f"Loaded {len(vehicles_df)} vehicles from uploaded CSV")
+                else:
+                    # Use live API data filtered by ward
+                    vehicles_df = vehicle_service.get_vehicles_by_ward(ward_no.strip())
+                    print(f"Loaded {len(vehicles_df)} vehicles for ward {ward_no}")
+                    
+                    # Save vehicle data for map generation
+                    vehicles_csv_path = os.path.join(temp_dir, "vehicles.csv")
+                    vehicles_df.to_csv(vehicles_csv_path, index=False)
+                    vehicles_path = vehicles_csv_path
+                    vehicle_source = "Live API (Ward Filtered)"
                 
-                # Save vehicle data for map generation
-                vehicles_csv_path = os.path.join(temp_dir, "vehicles.csv")
-                vehicles_df.to_csv(vehicles_csv_path, index=False)
-                vehicles_path = vehicles_csv_path
-                vehicle_source = "Live API (Ward Filtered)"
-                
+                # Check if any vehicles found
                 if len(vehicles_df) == 0:
-                    raise HTTPException(status_code=404, detail=f"No vehicles found")
+                    source_msg = "uploaded CSV" if vehicles_csv and vehicles_csv.filename else f"ward {ward_no}"
+                    raise HTTPException(status_code=404, detail=f"No vehicles found in {source_msg}. Cannot generate routes without vehicles.")
+                
+                # Check if any active vehicles found
+                active_vehicles = vehicles_df[vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])]
+                if len(active_vehicles) == 0:
+                    source_msg = "uploaded CSV" if vehicles_csv and vehicles_csv.filename else f"ward {ward_no}"
+                    raise HTTPException(status_code=404, detail=f"No active vehicles found in {source_msg}. Cannot generate routes without active vehicles.")
                 
                 # Optimize routes with capacity constraints
                 optimizer = CapacityRouteOptimizer()
@@ -162,6 +210,9 @@ async def optimize_routes(
                 
             except HTTPException:
                 raise
+            except ValueError as ve:
+                print(f"Route optimization failed: {ve}")
+                raise HTTPException(status_code=400, detail=str(ve))
             except Exception as vehicle_error:
                 print(f"Failed to get vehicle data: {vehicle_error}")
                 raise HTTPException(status_code=500, detail="Failed to get vehicle data")
@@ -258,7 +309,7 @@ async def optimize_routes(
                 "active_vehicles": optimization_result['active_vehicles'],
                 "total_houses": optimization_result['total_houses'],
                 "total_trips": len(route_summary),
-                "vehicle_source": "Live API (Ward Filtered)",
+                "vehicle_source": vehicle_source,
                 "vehicles": vehicle_data,
                 "route_summary": route_summary,
                 "features": [
@@ -314,6 +365,16 @@ class ClusterRoadsResponse(BaseModel):
 class AllClustersRoadsResponse(BaseModel):
     total_clusters: int
     clusters: List[ClusterRoadsResponse]
+
+class RouteCoordinate(BaseModel):
+    lat: float
+    lon: float
+    time: str
+
+class ClusterRouteResponse(BaseModel):
+    vehicleNumber: str
+    routeName: str
+    coordinates: List[RouteCoordinate]
 
 @app.get("/cluster/{cluster_id}", tags=["clusters"], response_model=ClusterRoadsResponse)
 async def get_cluster_roads(cluster_id: int):
@@ -438,6 +499,258 @@ async def get_cluster_roads(cluster_id: int):
     except Exception as e:
         logger.error(f"Error getting cluster roads: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get cluster roads: {str(e)}")
+
+@app.get("/cluster-routes", tags=["clusters"], response_model=List[ClusterRouteResponse])
+async def get_cluster_route_coordinates():
+    """Get road coordinates for every cluster and upload to external URL.
+    
+    Returns route coordinates for all clusters with vehicle information,
+    route names, and coordinate details including timestamps.
+    """
+    try:
+        roads_path = os.path.join("output", "roads.geojson")
+        buildings_path = os.path.join("output", "buildings.geojson")
+        vehicles_path = os.path.join("output", "vehicles.csv")
+        optimization_path = os.path.join("output", "optimization_result.json")
+        
+        if not all(os.path.exists(p) for p in [roads_path, buildings_path, vehicles_path]):
+            raise HTTPException(status_code=404, detail="Cluster data not found. Run /optimize-routes first")
+        
+        roads_gdf = gpd.read_file(roads_path)
+        buildings_gdf = gpd.read_file(buildings_path)
+        vehicles_df = pd.read_csv(vehicles_path)
+        
+        if roads_gdf.crs != 'EPSG:4326':
+            roads_gdf = roads_gdf.to_crs('EPSG:4326')
+        if buildings_gdf.crs != 'EPSG:4326':
+            buildings_gdf = buildings_gdf.to_crs('EPSG:4326')
+        
+        active_vehicles = vehicles_df[
+            vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])
+        ]
+        
+        # Load optimization results if available
+        optimization_result = None
+        if os.path.exists(optimization_path):
+            with open(optimization_path, 'r') as f:
+                optimization_result = json.load(f)
+        
+        # Build road network
+        G = nx.Graph()
+        road_coordinates = []
+        
+        for idx, road in roads_gdf.iterrows():
+            geom = road.geometry
+            if geom.geom_type == 'MultiLineString':
+                for line in geom.geoms:
+                    coords = list(line.coords)
+                    road_coordinates.extend(coords)
+                    for i in range(len(coords)-1):
+                        p1, p2 = coords[i], coords[i+1]
+                        dist = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
+                        G.add_edge(p1, p2, weight=dist)
+            else:
+                coords = list(geom.coords)
+                road_coordinates.extend(coords)
+                for i in range(len(coords)-1):
+                    p1, p2 = coords[i], coords[i+1]
+                    dist = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
+                    G.add_edge(p1, p2, weight=dist)
+        
+        cluster_routes = []
+        
+        if optimization_result and 'route_assignments' in optimization_result:
+            # Use optimization results
+            for vehicle_id, assignment in optimization_result['route_assignments'].items():
+                vehicle_info = assignment['vehicle_info']
+                
+                for trip_idx, trip in enumerate(assignment['trips']):
+                    # Get house coordinates for this trip
+                    house_indices = trip.get('houses', [])
+                    house_coords = []
+                    
+                    for house_idx in house_indices:
+                        if house_idx < len(buildings_gdf):
+                            pt = buildings_gdf.iloc[house_idx].geometry.centroid
+                            house_coords.append((pt.x, pt.y))
+                    
+                    if house_coords:
+                        # Generate road route coordinates
+                        route_coords = []
+                        road_points = list(set(road_coordinates))
+                        
+                        # Create route through nearest road points
+                        route_path = []
+                        for house_coord in house_coords:
+                            if road_points:
+                                distances = [((house_coord[0]-rp[0])**2 + (house_coord[1]-rp[1])**2)**0.5 for rp in road_points]
+                                nearest_road = road_points[np.argmin(distances)]
+                                if nearest_road not in route_path:
+                                    route_path.append(nearest_road)
+                        
+                        # Add road segments between points
+                        full_route = []
+                        for i in range(len(route_path)):
+                            full_route.append(route_path[i])
+                            if i < len(route_path) - 1:
+                                try:
+                                    path = nx.shortest_path(G, route_path[i], route_path[i+1], weight='weight')
+                                    full_route.extend(path[1:])
+                                except:
+                                    pass
+                        
+                        # Convert to coordinates with timestamps
+                        for i, coord in enumerate(full_route):
+                            minutes_elapsed = i * 1  # 1 minute per road point
+                            hours = 8 + (minutes_elapsed // 60)
+                            mins = minutes_elapsed % 60
+                            time_str = f"{hours:02d}:{mins:02d}:00"
+                            
+                            route_coords.append({
+                                "lat": coord[1],
+                                "lon": coord[0],
+                                "time": time_str
+                            })
+                        
+                        cluster_routes.append({
+                            "vehicleNumber": str(vehicle_info['vehicle_id']),
+                            "routeName": f"Route-{vehicle_id}-Trip-{trip_idx + 1}",
+                            "coordinates": route_coords
+                        })
+        else:
+            # Fallback to simple clustering
+            buildings_projected = buildings_gdf.to_crs('EPSG:3857')
+            building_centroids = [(pt.x, pt.y) for pt in buildings_projected.geometry.centroid]
+            kmeans = KMeans(n_clusters=min(len(active_vehicles), len(building_centroids)), random_state=42, n_init=10)
+            building_clusters = kmeans.fit_predict(building_centroids).tolist()
+            
+            for cluster_id in range(min(len(active_vehicles), max(building_clusters) + 1)):
+                cluster_buildings = [i for i, c in enumerate(building_clusters) if c == cluster_id]
+                
+                if cluster_buildings:
+                    house_coords = []
+                    for i in cluster_buildings:
+                        pt = buildings_gdf.iloc[i].geometry.centroid
+                        house_coords.append((pt.x, pt.y))
+                    
+                    route_coords = []
+                    road_points = list(set(road_coordinates))
+                    
+                    # Create route through nearest road points
+                    route_path = []
+                    for house_coord in house_coords:
+                        if road_points:
+                            distances = [((house_coord[0]-rp[0])**2 + (house_coord[1]-rp[1])**2)**0.5 for rp in road_points]
+                            nearest_road = road_points[np.argmin(distances)]
+                            if nearest_road not in route_path:
+                                route_path.append(nearest_road)
+                    
+                    # Add road segments between points
+                    full_route = []
+                    for i in range(len(route_path)):
+                        full_route.append(route_path[i])
+                        if i < len(route_path) - 1:
+                            try:
+                                path = nx.shortest_path(G, route_path[i], route_path[i+1], weight='weight')
+                                full_route.extend(path[1:])
+                            except:
+                                pass
+                    
+                    # Convert to coordinates with timestamps
+                    for i, coord in enumerate(full_route):
+                        minutes_elapsed = i * 1
+                        hours = 8 + (minutes_elapsed // 60)
+                        mins = minutes_elapsed % 60
+                        time_str = f"{hours:02d}:{mins:02d}:00"
+                        
+                        route_coords.append({
+                            "lat": coord[1],
+                            "lon": coord[0],
+                            "time": time_str
+                        })
+                    
+                    vehicle_info = active_vehicles.iloc[cluster_id] if cluster_id < len(active_vehicles) else {}
+                    cluster_routes.append({
+                        "vehicleNumber": str(vehicle_info.get('vehicle_id', f'vehicle_{cluster_id}')),
+                        "routeName": f"Route-Cluster-{cluster_id + 1}",
+                        "coordinates": route_coords
+                    })
+        
+        # Upload data to external URL
+        upload_status = {"success": False, "uploaded_count": 0, "failed_count": 0, "details": []}
+        try:
+            load_dotenv()
+            
+            external_url = os.getenv('EXTERNAL_UPLOAD_URL')
+            swm_token = os.getenv('SWM_TOKEN')
+            
+            if external_url and swm_token:
+                # Clean the URL (remove any trailing quote)
+                external_url = external_url.rstrip("'")
+                
+                headers = {
+                    'Authorization': 'Bearer ' + swm_token.strip("'\""),
+                    'Content-Type': 'application/json'
+                }
+                
+                logger.info(f"Uploading {len(cluster_routes)} routes to {external_url}")
+                
+                # Upload each route individually with retry logic
+                for route in cluster_routes:
+                    success = False
+                    for attempt in range(3):  # 3 retry attempts
+                        try:
+                            response = requests.post(
+                                external_url,
+                                json=route,
+                                headers=headers,
+                                timeout=60  # Increased timeout
+                            )
+                            if response.status_code in [200, 201]:
+                                upload_status["uploaded_count"] += 1
+                                upload_status["details"].append({"route": route['routeName'], "status": "success", "code": response.status_code})
+                                success = True
+                                logger.info(f"✅ Uploaded route {route['routeName']}: {response.status_code}")
+                                break
+                            elif response.status_code == 409:  # Conflict - already exists
+                                upload_status["uploaded_count"] += 1
+                                upload_status["details"].append({"route": route['routeName'], "status": "already_exists", "code": response.status_code})
+                                success = True
+                                logger.info(f"📝 Route {route['routeName']} already exists: {response.status_code}")
+                                break
+                            else:
+                                logger.warning(f"⚠️ Attempt {attempt + 1} failed for {route['routeName']}: {response.status_code} - {response.text[:100]}")
+                                if attempt == 2:  # Last attempt
+                                    upload_status["failed_count"] += 1
+                                    upload_status["details"].append({"route": route['routeName'], "status": "failed", "code": response.status_code, "response": response.text[:200]})
+                        except Exception as route_error:
+                            logger.warning(f"⚠️ Attempt {attempt + 1} error for {route['routeName']}: {route_error}")
+                            if attempt == 2:  # Last attempt
+                                upload_status["failed_count"] += 1
+                                upload_status["details"].append({"route": route['routeName'], "status": "error", "error": str(route_error)})
+                    
+                    if not success:
+                        logger.error(f"❌ Failed to upload route {route['routeName']} after 3 attempts")
+                
+                upload_status["success"] = upload_status["failed_count"] == 0
+                logger.info(f"Upload complete: {upload_status['uploaded_count']} success, {upload_status['failed_count']} failed")
+            else:
+                upload_status["details"].append({"status": "skipped", "reason": "External upload URL or token not configured"})
+                logger.warning("External upload URL or token not configured")
+        except Exception as upload_error:
+            upload_status["details"].append({"status": "error", "error": str(upload_error)})
+            logger.error(f"Failed to upload to external URL: {upload_error}")
+        
+        return JSONResponse(convert_numpy_types({
+            "routes": cluster_routes,
+            "upload_status": upload_status
+        }))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting cluster route coordinates: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cluster route coordinates: {str(e)}")
 
 @app.get("/clusters", tags=["clusters"], response_model=AllClustersRoadsResponse)
 async def get_all_cluster_roads():
@@ -946,6 +1259,8 @@ async def cleanup_data():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
+
+
 @app.get("/")
 async def root():
     return HTMLResponse(content="""
@@ -959,16 +1274,20 @@ async def root():
             <h3>Available Endpoints:</h3>
             <ul>
                 <li><strong>POST /optimize-routes</strong> - Upload files with ward_no and generate optimized routes using live vehicles</li>
+                <li><strong>GET /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
                 <li><strong>GET /cluster/{cluster_id}</strong> - Get cluster roads with coordinates for specific cluster</li>
                 <li><strong>GET /clusters</strong> - Get cluster roads with coordinates for all clusters</li>
                 <li><strong>GET /generate-map/route_map</strong> - View interactive map with layer controls</li>
                 <li><strong>GET /api/vehicles/live</strong> - Get live vehicle data from SWM API</li>
                 <li><strong>GET /api/vehicles/{vehicle_id}</strong> - Get specific vehicle details</li>
                 <li><strong>PUT /api/vehicles/{vehicle_id}/status</strong> - Update vehicle status</li>
+                <li><strong>GET /api/auth/token/info</strong> - Check current token status</li>
+                <li><strong>POST /api/auth/token/refresh</strong> - Force refresh token</li>
             </ul>
             <h3>Features:</h3>
             <ul>
                 <li>🌐 <strong>Ward-based Vehicle Filtering</strong> - Real-time vehicle data filtered by ward number</li>
+                <li>⏰ <strong>Automatic Daily Scheduling</strong> - Daily vehicle data fetch at 5:30 AM</li>
                 <li>✅ Interactive cluster dashboard panel</li>
                 <li>✅ Layer controls to show/hide individual clusters</li>
                 <li>✅ Toggle buttons for each cluster</li>
@@ -977,6 +1296,7 @@ async def root():
                 <li>🔐 API Key authentication</li>
                 <li>📱 RESTful vehicle management endpoints</li>
                 <li>🏘️ Ward-based vehicle clustering and optimization</li>
+                <li>📊 Automatic daily data logging with timestamps</li>
             </ul>
             <p><a href="/docs" style="background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">📚 API Documentation</a></p>
         </body>
