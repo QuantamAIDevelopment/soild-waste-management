@@ -61,18 +61,44 @@ class GeospatialRouteOptimizer:
         logger.info("3️⃣ Loading vehicles from live API and clustering buildings...")
         vehicles_df = self.clusterer.load_vehicles(vehicles_csv)  # vehicles_csv is now optional
         num_vehicles = len(vehicles_df)
-        clustered_buildings = self.clusterer.cluster_buildings(snapped_buildings, num_vehicles)
+        
+        # Use ward-based fixed clustering if ward information is available
+        if 'ward_no' in snapped_buildings.columns or 'wardNo' in snapped_buildings.columns:
+            ward_col = 'ward_no' if 'ward_no' in snapped_buildings.columns else 'wardNo'
+            unique_wards = snapped_buildings[ward_col].unique()
+            logger.info(f"Found {len(unique_wards)} wards: {unique_wards}")
+            
+            # Process each ward separately with fixed assignments
+            ward_results = []
+            for ward_no in unique_wards:
+                ward_buildings = snapped_buildings[snapped_buildings[ward_col] == ward_no].copy()
+                ward_clustered = self.clusterer.cluster_buildings_by_ward(ward_buildings, str(ward_no))
+                ward_results.append(ward_clustered)
+            
+            if ward_results:
+                clustered_buildings = pd.concat(ward_results, ignore_index=True)
+                logger.info(f"Fixed clustering completed for {len(unique_wards)} wards")
+            else:
+                clustered_buildings = self.clusterer.cluster_buildings(snapped_buildings, num_vehicles)
+        else:
+            clustered_buildings = self.clusterer.cluster_buildings(snapped_buildings, num_vehicles)
         
         # 4️⃣ Compute optimal routes with trip assignments
         logger.info("4️⃣ Computing optimal routes with trip assignments...")
         self.route_computer = RouteComputer(road_graph)
         routes = self.route_computer.compute_cluster_routes(clustered_buildings)
         
-        # Log trip statistics
+        # Log clustering statistics
         if hasattr(self.clusterer, 'trip_assignments'):
             trip_info = self.clusterer.trip_assignments
             logger.info(f"📊 Trip Summary: {trip_info['num_trips']} trips, {trip_info['total_houses']} houses")
             logger.info(f"🏠 Houses per trip capacity: {trip_info['houses_per_trip']}")
+        elif self.clusterer.ward_vehicle_assignments:
+            total_wards = len(self.clusterer.ward_vehicle_assignments)
+            total_vehicles = sum(data['num_vehicles'] for data in self.clusterer.ward_vehicle_assignments.values())
+            logger.info(f"📊 Fixed Assignment Summary: {total_wards} wards, {total_vehicles} vehicles")
+            for ward_no, data in self.clusterer.ward_vehicle_assignments.items():
+                logger.info(f"🏘️ Ward {ward_no}: {data['num_vehicles']} vehicles with fixed clusters")
         
         # 5️⃣ Get OSRM directions with color coding
         logger.info("5️⃣ Getting turn-by-turn directions...")
@@ -122,12 +148,17 @@ class GeospatialRouteOptimizer:
         logger.info(f"📏 Total distance: {results['total_distance']:.0f}m")
         logger.info(f"⏱️ Total duration: {results['total_duration']/60:.1f} min")
         
-        # Add trip-specific results
+        # Add clustering-specific results
         if hasattr(self.clusterer, 'trip_assignments'):
             trip_info = self.clusterer.trip_assignments
             results['num_trips'] = trip_info['num_trips']
             results['houses_per_trip_capacity'] = trip_info['houses_per_trip']
             logger.info(f"🚛 Trips assigned: {trip_info['num_trips']} (max 2 per day)")
+        elif self.clusterer.ward_vehicle_assignments:
+            results['ward_assignments'] = self.clusterer.ward_vehicle_assignments
+            results['clustering_type'] = 'fixed_ward_based'
+            total_wards = len(self.clusterer.ward_vehicle_assignments)
+            logger.info(f"🏘️ Fixed assignments: {total_wards} wards with dedicated vehicle clusters")
         
         return results
 
@@ -140,7 +171,7 @@ def main():
     parser.add_argument("--output", default="output", help="Output directory")
     parser.add_argument("--osrm-url", default="http://router.project-osrm.org", help="OSRM server URL")
     parser.add_argument("--api", action="store_true", help="Start FastAPI server instead")
-    parser.add_argument("--port", type=int, default=8001, help="Port for FastAPI server (default: 8081)")
+    parser.add_argument("--port", type=int, default=8081, help="Port for FastAPI server (default: 8081)")
     
     args = parser.parse_args()
     
@@ -195,6 +226,10 @@ def main():
             webbrowser.open(f"file://{map_path}")
             
             print(f"Vehicle data source: {'Live API' if not args.vehicles else 'CSV file'}")
+            if 'clustering_type' in results and results['clustering_type'] == 'fixed_ward_based':
+                print(f"Clustering: Fixed ward-based assignments ({len(results.get('ward_assignments', {}))} wards)")
+            else:
+                print(f"Clustering: Trip-based assignments")
             
         except Exception as e:
             logger.error(f"❌ Pipeline failed: {e}")

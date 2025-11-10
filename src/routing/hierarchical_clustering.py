@@ -7,7 +7,32 @@ from scipy.spatial.distance import cdist
 class HierarchicalSpatialClustering:
     def __init__(self):
         self.clusters = {}
+        self.fixed_assignments = {}  # Store fixed vehicle-cluster assignments
         
+    def create_fixed_clusters_by_ward(self, coordinates: List[Tuple], num_vehicles: int, ward_no: str = None) -> Dict:
+        """Create fixed clusters based on total vehicles in ward."""
+        if num_vehicles == 0:
+            return {}
+            
+        # Create fixed spatial clusters based on vehicle count
+        vehicle_clusters = self._create_fixed_vehicle_clusters(coordinates, num_vehicles, ward_no)
+        
+        # Store fixed assignments for consistency
+        if ward_no:
+            self.fixed_assignments[ward_no] = vehicle_clusters
+        
+        hierarchical_clusters = {}
+        for vehicle_idx, vehicle_houses in vehicle_clusters.items():
+            hierarchical_clusters[vehicle_idx] = {
+                'vehicle_idx': vehicle_idx,
+                'ward_no': ward_no,
+                'houses': vehicle_houses,
+                'coordinates': [coordinates[i] for i in vehicle_houses],
+                'fixed_assignment': True
+            }
+        
+        return hierarchical_clusters
+    
     def create_non_overlapping_clusters(self, coordinates: List[Tuple], num_vehicles: int, trips_per_vehicle: List[int]) -> Dict:
         """Create hierarchical clusters like states divided in a country."""
         
@@ -40,6 +65,24 @@ class HierarchicalSpatialClustering:
                 cluster_id += 1
         
         return hierarchical_clusters
+    
+    def _create_fixed_vehicle_clusters(self, coordinates: List[Tuple], num_vehicles: int, ward_no: str = None) -> Dict:
+        """Create fixed vehicle clusters for consistent assignment."""
+        if num_vehicles == 1:
+            return {0: list(range(len(coordinates)))}
+        
+        # Use deterministic clustering with fixed seed for consistency
+        kmeans = KMeans(n_clusters=num_vehicles, random_state=hash(ward_no or 'default') % 2147483647, n_init=10)
+        labels = kmeans.fit_predict(coordinates)
+        
+        # Group houses by vehicle cluster
+        vehicle_clusters = {}
+        for house_idx, cluster_label in enumerate(labels):
+            if cluster_label not in vehicle_clusters:
+                vehicle_clusters[cluster_label] = []
+            vehicle_clusters[cluster_label].append(house_idx)
+        
+        return vehicle_clusters
     
     def _create_vehicle_clusters(self, coordinates: List[Tuple], num_vehicles: int) -> Dict:
         """Create main vehicle clusters using spatial boundaries."""

@@ -73,11 +73,16 @@ class VehicleService:
             logger.error(f"Error fetching live vehicle data: {e}")
             return self._create_fallback_vehicles()
     
-    def get_vehicles_by_ward(self, ward_no: str) -> pd.DataFrame:
-        """Get vehicles filtered by ward number."""
+    def get_vehicles_by_ward(self, ward_no: str, include_all_status: bool = True) -> pd.DataFrame:
+        """Get ALL vehicles filtered by ward number (default: all statuses).
+        
+        Args:
+            ward_no: Ward number to filter
+            include_all_status: If True, returns all vehicles regardless of status (default: True)
+        """
         try:
-            # Get all vehicles first
-            all_vehicles = self.get_live_vehicles()
+            # Always get all vehicles by default
+            all_vehicles = self.get_live_vehicles_all_status()
             
             # Filter by ward - check multiple possible ward field names
             ward_fields = ['ward', 'wardNo', 'ward_no', 'wardNumber', 'zone', 'area']
@@ -87,13 +92,12 @@ class VehicleService:
                 if field in all_vehicles.columns:
                     filtered_vehicles = all_vehicles[all_vehicles[field].astype(str) == str(ward_no)]
                     if len(filtered_vehicles) > 0:
-                        logger.info(f"Found {len(filtered_vehicles)} vehicles in ward {ward_no} using field '{field}'")
+                        logger.info(f"Found {len(filtered_vehicles)} vehicles (all statuses) in ward {ward_no} using field '{field}'")
                         break
             
             # If no ward field found or no matches, return empty DataFrame
             if filtered_vehicles is None or len(filtered_vehicles) == 0:
                 logger.warning(f"No vehicles found in ward {ward_no}")
-                # Return empty DataFrame with same structure
                 return pd.DataFrame(columns=all_vehicles.columns)
             
             return filtered_vehicles
@@ -101,6 +105,48 @@ class VehicleService:
         except Exception as e:
             logger.error(f"Error filtering vehicles by ward {ward_no}: {e}")
             return self._create_fallback_vehicles(ward_no)
+    
+    def get_live_vehicles_all_status(self) -> pd.DataFrame:
+        """Fetch ALL vehicles from API regardless of status."""
+        try:
+            token = self.auth_service.get_valid_token()
+            if not token:
+                logger.error("Could not get valid authentication token")
+                return self._create_fallback_vehicles()
+            
+            from datetime import datetime
+            today = datetime.now().strftime('%Y-%m-%d')
+            endpoint = f'/api/vehicles/paginated?date={today}&size=542&sortBy=vehicleNo'
+            url = f"{self.base_url}{endpoint}"
+            
+            headers = {'accept': '*/*', 'Authorization': f'Bearer {token}'}
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                vehicles_data = response.json()
+                # Process without status filtering
+                if isinstance(vehicles_data, list):
+                    df = pd.DataFrame(vehicles_data)
+                elif isinstance(vehicles_data, dict):
+                    if 'content' in vehicles_data:
+                        df = pd.DataFrame(vehicles_data['content'])
+                    elif 'data' in vehicles_data:
+                        df = pd.DataFrame(vehicles_data['data'])
+                    else:
+                        df = pd.DataFrame([vehicles_data])
+                else:
+                    return self._create_fallback_vehicles()
+                
+                df = self._standardize_vehicle_data(df)
+                logger.success(f"Loaded {len(df)} vehicles (all statuses) from live API")
+                return df
+            else:
+                logger.error(f"API returned status {response.status_code}")
+                return self._create_fallback_vehicles()
+                
+        except Exception as e:
+            logger.error(f"Error fetching vehicles: {e}")
+            return self._create_fallback_vehicles()
     
     def _get_auth_methods(self):
         """Get all possible authentication methods to try."""

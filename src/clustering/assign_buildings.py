@@ -6,12 +6,15 @@ from loguru import logger
 import numpy as np
 from src.services.vehicle_service import VehicleService
 from src.clustering.trip_assignment import TripAssignmentManager
+from src.routing.hierarchical_clustering import HierarchicalSpatialClustering
 
 class BuildingClusterer:
     def __init__(self):
         self.clusters = None
         self.vehicle_service = VehicleService()
         self.trip_manager = TripAssignmentManager()
+        self.hierarchical_clusterer = HierarchicalSpatialClustering()
+        self.ward_vehicle_assignments = {}  # Store fixed assignments per ward
         
     def load_vehicles(self, csv_path: str = None) -> pd.DataFrame:
         """Load vehicle data from live API or fallback to CSV."""
@@ -40,13 +43,110 @@ class BuildingClusterer:
             # Return fallback data instead of raising
             return self.vehicle_service._create_fallback_vehicles()
     
+    def cluster_buildings_by_ward(self, buildings_gdf: gpd.GeoDataFrame, ward_no: str) -> gpd.GeoDataFrame:
+        """Cluster buildings based on TOTAL vehicles in ward (all statuses)."""
+        if len(buildings_gdf) == 0:
+            logger.warning(f"No buildings to cluster in ward {ward_no}")
+            return buildings_gdf
+        
+        # Get ALL vehicles for this ward (all statuses)
+        ward_vehicles = self.vehicle_service.get_vehicles_by_ward(ward_no, include_all_status=True)
+        total_vehicles = len(ward_vehicles)
+        
+        if total_vehicles == 0:
+            logger.warning(f"No vehicles found in ward {ward_no}")
+            buildings_gdf['cluster'] = 'no_vehicle'
+            buildings_gdf['vehicle_id'] = None
+            return buildings_gdf
+        
+        # Extract coordinates for clustering
+        coordinates = [(geom.x, geom.y) for geom in buildings_gdf.geometry.centroid]
+        
+        # Create clusters based on TOTAL vehicle count (not just active)
+        fixed_clusters = self.hierarchical_clusterer.create_fixed_clusters_by_ward(
+            coordinates, total_vehicles, ward_no
+        )
+        
+        # Assign buildings to clusters
+        buildings_gdf = buildings_gdf.copy()
+        buildings_gdf['cluster'] = 'unassigned'
+        buildings_gdf['vehicle_id'] = None
+        buildings_gdf['ward_no'] = ward_no
+        
+        for cluster_id, cluster_data in fixed_clusters.items():
+            house_indices = cluster_data['houses']
+            vehicle_id = ward_vehicles.iloc[cluster_id % total_vehicles]['vehicle_id']
+            
+            for house_idx in house_indices:
+                if house_idx < len(buildings_gdf):
+                    buildings_gdf.iloc[house_idx, buildings_gdf.columns.get_loc('cluster')] = f"ward_{ward_no}_vehicle_{cluster_id}"
+                    buildings_gdf.iloc[house_idx, buildings_gdf.columns.get_loc('vehicle_id')] = vehicle_id
+        
+        # Store ward assignments
+        self.ward_vehicle_assignments[ward_no] = {
+            'total_vehicles': total_vehicles,
+            'clusters': fixed_clusters,
+            'all_vehicles': ward_vehicles
+        }
+        
+        logger.info(f"Ward {ward_no}: Created {total_vehicles} clusters based on total vehicles (all statuses)")
+        return buildings_gdf
+    
+    def cluster_buildings_with_vehicles(self, buildings_gdf: gpd.GeoDataFrame, vehicles_df: pd.DataFrame) -> gpd.GeoDataFrame:
+        """Cluster buildings using provided vehicles with geographic clustering (no API calls)."""
+        if len(buildings_gdf) == 0:
+            logger.warning("No buildings to cluster")
+            return buildings_gdf
+        
+        if len(vehicles_df) == 0:
+            logger.error("No vehicles provided for clustering")
+            return buildings_gdf
+        
+        buildings_gdf = buildings_gdf.copy()
+        num_vehicles = len(vehicles_df)
+        
+        # Extract coordinates for clustering
+        coordinates = np.array([(geom.x, geom.y) for geom in buildings_gdf.geometry.centroid])
+        
+        # Use KMeans for geographic clustering
+        kmeans = KMeans(n_clusters=num_vehicles, random_state=42, n_init=10)
+        cluster_labels = kmeans.fit_predict(coordinates)
+        
+        # Assign clusters to buildings
+        buildings_gdf['cluster'] = 'unassigned'
+        buildings_gdf['vehicle_id'] = None
+        
+        for i, (_, vehicle) in enumerate(vehicles_df.iterrows()):
+            vehicle_id = vehicle['vehicle_id']
+            
+            # Find buildings assigned to this cluster
+            cluster_mask = cluster_labels == i
+            cluster_indices = np.where(cluster_mask)[0]
+            
+            # Assign buildings to this vehicle
+            for idx in cluster_indices:
+                buildings_gdf.iloc[idx, buildings_gdf.columns.get_loc('cluster')] = f"vehicle_{i}"
+                buildings_gdf.iloc[idx, buildings_gdf.columns.get_loc('vehicle_id')] = vehicle_id
+        
+        # Verify no overlaps
+        cluster_counts = buildings_gdf['cluster'].value_counts()
+        total_assigned = cluster_counts.sum()
+        
+        logger.info(f"Geographic clustering: {len(buildings_gdf)} buildings to {num_vehicles} vehicles (no overlaps)")
+        logger.info(f"Cluster distribution: {dict(cluster_counts)}")
+        
+        return buildings_gdf
+    
     def cluster_buildings(self, buildings_gdf: gpd.GeoDataFrame, num_vehicles: int, method='kmeans') -> gpd.GeoDataFrame:
         """Cluster buildings based on vehicle capacity and trip constraints."""
         if len(buildings_gdf) == 0:
             logger.warning("No buildings to cluster")
             return buildings_gdf
         
-        # Assign trips based on capacity constraints
+        # REMOVED: Ward-specific clustering that makes API calls
+        # This was causing API calls even when CSV was uploaded
+        
+        # Fallback to original trip-based clustering
         trip_assignments = self.trip_manager.assign_trips(buildings_gdf, num_vehicles)
         
         # Validate no overlap
@@ -119,15 +219,57 @@ class BuildingClusterer:
         if hasattr(self, 'trip_assignments'):
             # Use trip-based summary
             return self.trip_manager.get_trip_summary(self.trip_assignments)
+        elif self.ward_vehicle_assignments:
+            # Use ward-based fixed assignment summary
+            return self._get_ward_assignment_summary(buildings_gdf)
         else:
             # Fallback to original cluster summary
             summary = buildings_gdf.groupby('cluster').agg({
                 'geometry': 'count',
-                'snap_distance': ['mean', 'max']
+                'snap_distance': ['mean', 'max'] if 'snap_distance' in buildings_gdf.columns else ['count', 'count']
             }).round(4)
             
-            summary.columns = ['building_count', 'avg_snap_distance', 'max_snap_distance']
+            if 'snap_distance' in buildings_gdf.columns:
+                summary.columns = ['building_count', 'avg_snap_distance', 'max_snap_distance']
+            else:
+                summary.columns = ['building_count', 'total_buildings', 'cluster_size']
             summary = summary.reset_index()
             
             logger.info(f"Generated summary for {len(summary)} clusters")
             return summary
+    
+    def get_ward_vehicle_count(self, ward_no: str) -> int:
+        """Get the TOTAL number of vehicles in ward (all statuses)."""
+        ward_vehicles = self.vehicle_service.get_vehicles_by_ward(ward_no, include_all_status=True)
+        return len(ward_vehicles)
+    
+    def get_fixed_assignment_for_ward(self, ward_no: str) -> dict:
+        """Get the fixed cluster assignment for a specific ward."""
+        return self.ward_vehicle_assignments.get(ward_no, {})
+    
+    def _get_ward_assignment_summary(self, buildings_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+        """Generate summary for ward-based fixed assignments."""
+        summary_data = []
+        
+        for ward_no, assignment_data in self.ward_vehicle_assignments.items():
+            num_vehicles = assignment_data['num_vehicles']
+            vehicles = assignment_data['vehicles']
+            
+            # Count buildings per vehicle in this ward
+            ward_buildings = buildings_gdf[buildings_gdf.get('ward_no', '') == ward_no]
+            
+            for i, vehicle in vehicles.iterrows():
+                vehicle_id = vehicle['vehicle_id']
+                vehicle_buildings = ward_buildings[ward_buildings.get('vehicle_id', '') == vehicle_id]
+                
+                summary_data.append({
+                    'ward_no': ward_no,
+                    'vehicle_id': vehicle_id,
+                    'building_count': len(vehicle_buildings),
+                    'cluster': f"ward_{ward_no}_vehicle_{i}",
+                    'fixed_assignment': True
+                })
+        
+        summary_df = pd.DataFrame(summary_data)
+        logger.info(f"Generated ward-based summary for {len(summary_data)} vehicle assignments")
+        return summary_df

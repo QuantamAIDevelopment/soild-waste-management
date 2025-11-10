@@ -180,25 +180,65 @@ def process_ward_data(self, roads_geojson, buildings_geojson, vehicles_csv=None)
     self.map_generator.create_route_map(routes_gdf, clustered_buildings)
 ```
 
+### Key Implementation: Cluster-Based Route Assignment
+
+The system implements a **two-phase clustering strategy**:
+
+**Phase 1: Create Fixed Clusters (Based on TOTAL Vehicles)**
+```python
+# Create clusters using ALL vehicles (active + inactive)
+total_vehicles = len(vehicles_df)  # e.g., 7 vehicles
+clusters = create_clusters(buildings, num_clusters=total_vehicles)
+# Result: 7 fixed spatial clusters
+```
+
+**Phase 2: Assign Routes (Based on ACTIVE Vehicles Only)**
+```python
+# Filter active vehicles for route assignment
+active_vehicles = vehicles_df[vehicles_df['status'].isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])]
+active_count = len(active_vehicles)  # e.g., 4 active vehicles
+
+# Distribute all clusters among active vehicles
+clusters_per_vehicle = total_vehicles // active_count  # 7 // 4 = 1
+remaining = total_vehicles % active_count  # 7 % 4 = 3
+
+# Distribution:
+# Vehicle 1: clusters 0, 1 (2 clusters)
+# Vehicle 2: clusters 2, 3 (2 clusters)  
+# Vehicle 3: clusters 4, 5 (2 clusters)
+# Vehicle 4: cluster 6 (1 cluster)
+```
+
+**Benefits:**
+- Consistent cluster boundaries (never change)
+- Fair workload distribution among active vehicles
+- Easy to scale when vehicles become active/inactive
+- Each active vehicle handles multiple clusters through multiple trips
+
 ### 2. Clustering Algorithm
 ```python
 # Building clustering with vehicle capacity
 from src.clustering.assign_buildings import BuildingClusterer
 from src.services.vehicle_service import VehicleService
 
-# Live vehicle data integration
+# Live vehicle data integration (ALL vehicles including inactive)
 vehicle_service = VehicleService()
-vehicles_df = vehicle_service.get_vehicles_by_ward(ward_no)  # Ward-filtered
+vehicles_df = vehicle_service.get_vehicles_by_ward(ward_no, include_all_status=True)
 
-# Capacity-based clustering
+# Two-phase clustering
 clusterer = BuildingClusterer()
 clusterer.load_vehicles(vehicles_csv)  # Optional CSV override
-clustered_buildings = clusterer.cluster_buildings(buildings, len(vehicles_df))
 
-# Trip assignment based on capacity (500 houses per trip)
-if hasattr(clusterer, 'trip_assignments'):
-    trip_info = clusterer.trip_assignments
-    print(f"Trips: {trip_info['num_trips']}, Houses per trip: {trip_info['houses_per_trip']}")
+# Phase 1: Create clusters based on TOTAL vehicles
+total_vehicles = len(vehicles_df)
+clustered_buildings = clusterer.cluster_buildings_with_vehicles(buildings, vehicles_df)
+
+# Phase 2: Assign routes to ACTIVE vehicles only
+active_vehicles = vehicles_df[vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])]
+route_assignments = assign_clusters_to_active_vehicles(clustered_buildings, active_vehicles)
+
+print(f"Clusters: {total_vehicles}, Active vehicles: {len(active_vehicles)}")
+print(f"Each active vehicle handles ~{total_vehicles // len(active_vehicles)} clusters")
 ```
 
 ### 3. Route Computation
@@ -212,16 +252,25 @@ route_computer = RouteComputer(road_graph)
 routes = route_computer.compute_cluster_routes(clustered_buildings)
 
 # Capacity-based optimization (used in API)
-optimizer = CapacityRouteOptimizer()
+optimizer = CapacityRouteOptimizer(max_houses_per_trip=500)
+
+# Get ALL vehicles (including inactive) for clustering
+all_vehicles = vehicle_service.get_vehicles_by_ward(ward_no, include_all_status=True)
+
+# Optimization creates clusters from total vehicles, assigns routes to active only
 optimization_result = optimizer.optimize_routes_with_capacity(
-    buildings_gdf, vehicles_df, roads_gdf
+    buildings_gdf, all_vehicles, roads_gdf
 )
 
-# Access route assignments and trip details
+# Access route assignments (only active vehicles have routes)
 for vehicle_id, assignment in optimization_result['route_assignments'].items():
     vehicle_info = assignment['vehicle_info']
     trips = assignment['trips']
-    print(f"Vehicle {vehicle_id}: {len(trips)} trips, {vehicle_info['houses_assigned']} houses")
+    clusters_assigned = len(trips)  # Each trip = 1 cluster
+    print(f"Vehicle {vehicle_id} (ACTIVE): {clusters_assigned} clusters, {len(trips)} trips")
+
+print(f"Total clusters: {optimization_result['total_vehicles_in_ward']}")
+print(f"Active vehicles with routes: {optimization_result['active_vehicles']}")
 ```
 
 ### 4. Map Generation
@@ -407,6 +456,40 @@ logger.error("Error message")
 6. **Port Conflicts**: Default port 8081, use `--port` flag to change if occupied
 7. **Vehicle Data**: If no vehicles found, check ward number and API connectivity
 8. **Map Generation**: Maps auto-delete after serving, use `/generate-map` to regenerate
+9. **No Active Vehicles**: System returns error if no active vehicles in ward - check vehicle status
+10. **Cluster Count Mismatch**: Clusters = total vehicles, routes = active vehicles only
+
+### Important Implementation Notes
+
+**Two-Phase Clustering Logic**
+```python
+# CORRECT: Get ALL vehicles for clustering
+all_vehicles = vehicle_service.get_vehicles_by_ward(ward_no, include_all_status=True)
+total_count = len(all_vehicles)  # Used for cluster count
+
+# Create clusters based on total vehicles
+clusters = create_clusters(buildings, num_clusters=total_count)
+
+# THEN filter active vehicles for route assignment
+active_vehicles = all_vehicles[all_vehicles['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])]
+
+# Distribute all clusters among active vehicles
+assign_clusters_to_vehicles(clusters, active_vehicles)
+```
+
+**Key Files for Two-Phase Implementation**
+- `src/routing/capacity_optimizer.py`: `_assign_active_vehicles_to_clusters()` method
+- `src/clustering/assign_buildings.py`: `cluster_buildings_with_vehicles()` method
+- `src/api/geospatial_routes.py`: `/optimize-routes` endpoint logic
+
+**Status Filtering**
+```python
+# Valid active statuses
+ACTIVE_STATUSES = ['ACTIVE', 'AVAILABLE', 'ONLINE', 'READY', 'OPERATIONAL', 'IN_SERVICE']
+
+# Filter active vehicles
+active = vehicles_df[vehicles_df['status'].str.upper().isin(ACTIVE_STATUSES)]
+```
 
 ## Deployment
 

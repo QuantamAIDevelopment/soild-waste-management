@@ -1,17 +1,34 @@
 # Intelligent Garbage Collection Route Assignment System
 
-A production-ready Python system for optimizing garbage collection routes using geospatial AI, clustering algorithms, and VRP solving with live vehicle data integration.
+A production-ready Python system for optimizing garbage collection routes using geospatial AI, two-phase clustering algorithms, and VRP solving with live vehicle data integration.
+
+## 🎯 Core Innovation: Two-Phase Clustering
+
+The system implements a unique **two-phase clustering strategy** that separates cluster creation from route assignment:
+
+1. **Phase 1 - Fixed Clusters**: Creates clusters based on **TOTAL vehicles** (active + inactive)
+   - Example: 7 total vehicles → 7 fixed spatial clusters
+   - Cluster boundaries remain consistent and never change
+
+2. **Phase 2 - Dynamic Routes**: Assigns routes only to **ACTIVE vehicles**
+   - Example: 4 active vehicles handle all 7 clusters
+   - Distribution: 2, 2, 2, 1 clusters per active vehicle
+   - Each active vehicle handles multiple clusters through multiple trips
+
+**Benefits**: Consistent geography, fair workload distribution, easy scaling when vehicles become active/inactive.
 
 ## Features
 
+- **Two-Phase Clustering**: Clusters based on total vehicles, routes assigned to active vehicles only
 - **Live Vehicle Integration**: Real-time vehicle data from SWM API with automatic authentication
 - **Ward-based Filtering**: Filter vehicles by ward number for targeted route optimization
-- **Capacity-based Optimization**: Multi-trip assignment based on vehicle capacity constraints
+- **Status-Aware Routing**: Only ACTIVE/AVAILABLE/ONLINE vehicles receive route assignments
+- **Multi-Cluster Assignment**: Active vehicles handle multiple clusters through multiple trips
 - **Interactive Route Maps**: Folium-based maps with cluster controls and trip visualization
 - **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
 - **Automatic Scheduling**: Daily vehicle data fetch at 5:30 AM with APScheduler
 - **RESTful API**: FastAPI with OpenAPI/Swagger documentation
-- **Geospatial Processing**: NetworkX graphs, GeoPandas, and spatial clustering
+- **Geospatial Processing**: NetworkX graphs, GeoPandas, and KMeans spatial clustering
 
 ## Architecture
 
@@ -116,6 +133,25 @@ curl -X POST "http://localhost:8081/optimize-routes" \
   -F "ward_geojson=@ward.geojson" \
   -F "ward_no=1" \
   -F "vehicles_csv=@vehicles.csv"
+```
+
+**Response Example:**
+```json
+{
+  "status": "success",
+  "message": "Created 7 clusters from 7 total vehicles. Routes assigned to 4 active vehicles.",
+  "total_vehicles_in_ward": 7,
+  "active_vehicles": 4,
+  "clusters_created": 7,
+  "total_houses": 1400,
+  "clustering_strategy": "Clusters based on 7 total vehicles, routes assigned to 4 active vehicles",
+  "route_summary": [
+    {"vehicle_id": "SWM001", "clusters_assigned": 2, "trips": 2},
+    {"vehicle_id": "SWM002", "clusters_assigned": 2, "trips": 2},
+    {"vehicle_id": "SWM003", "clusters_assigned": 2, "trips": 2},
+    {"vehicle_id": "SWM004", "clusters_assigned": 1, "trips": 1}
+  ]
+}
 ```
 
 ### 2. Get Cluster Roads with Coordinates
@@ -278,16 +314,32 @@ SWM002,garbage_truck,1,active,500,Driver2
 - **Graph Construction**: NetworkX graph from road network for routing
 - **Live Data Integration**: Real-time vehicle data with authentication
 
-### 2. Capacity-based Clustering
-- **Vehicle Filtering**: Active vehicles only (status: ACTIVE/AVAILABLE/ONLINE)
-- **KMeans Clustering**: k = number of active vehicles
-- **Trip Assignment**: Multiple trips per vehicle based on capacity (500 houses/trip)
-- **Ward Filtering**: Vehicles filtered by ward number for targeted optimization
+### 2. Two-Phase Clustering Strategy
+
+**Phase 1: Create Fixed Clusters (Based on TOTAL Vehicles)**
+- **Cluster Count**: k = total vehicles in ward (ALL statuses: ACTIVE + INACTIVE)
+- **Algorithm**: KMeans spatial clustering for geographic distribution
+- **Purpose**: Create consistent, fixed cluster boundaries that never change
+- **Example**: 7 total vehicles → 7 fixed spatial clusters
+
+**Phase 2: Assign Routes (Based on ACTIVE Vehicles Only)**
+- **Vehicle Filtering**: Only ACTIVE/AVAILABLE/ONLINE vehicles get route assignments
+- **Distribution**: All clusters distributed evenly among active vehicles
+- **Multi-cluster Assignment**: Each active vehicle handles multiple clusters
+- **Example**: 7 clusters ÷ 4 active vehicles = 2, 2, 2, 1 clusters per vehicle
+
+**Benefits:**
+- ✅ Consistent geography: Cluster boundaries never change
+- ✅ Fair workload: Active vehicles share all clusters evenly
+- ✅ Scalable: Easy to add/remove active vehicles without re-clustering
+- ✅ Capacity aware: Respects 500 houses/trip limit per cluster
+- ✅ Status aware: Only active vehicles receive route assignments
 
 ### 3. Route Optimization
 - **VRP Solver**: OR-Tools with capacity constraints and time limits
 - **Distance Matrix**: NetworkX shortest paths on road network
-- **Multi-trip Support**: Up to 3 trips per vehicle per day
+- **Multi-trip Support**: Each cluster becomes a trip (or multiple if >500 houses)
+- **Trip Naming**: `vehicle_1_cluster_0_trip_1` format for tracking
 - **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
 
 ### 4. Interactive Visualization
@@ -295,6 +347,7 @@ SWM002,garbage_truck,1,active,500,Driver2
 - **Layer Management**: Show/hide individual trips and clusters
 - **Route Details**: Start/end markers, directional arrows, trip statistics
 - **Dashboard Panel**: Trip summary with toggle controls
+- **Vehicle Status**: Visual indicators for active vs inactive vehicles
 
 ## Testing
 
@@ -332,6 +385,73 @@ class Config:
     # Deterministic results
     RANDOM_SEED = 42
 ```
+
+## How It Works: Complete Example
+
+### Scenario
+- **Ward 1** has 7 total vehicles (4 active, 3 inactive)
+- **1400 buildings** need garbage collection
+- **Capacity**: 500 houses per trip maximum
+
+### Step-by-Step Process
+
+**Step 1: Create Fixed Clusters**
+```python
+total_vehicles = 7  # All vehicles (active + inactive)
+clusters = create_clusters(buildings=1400, num_clusters=7)
+# Result: 7 spatial clusters (~200 buildings each)
+```
+
+**Step 2: Filter Active Vehicles**
+```python
+active_vehicles = filter_by_status(['ACTIVE', 'AVAILABLE', 'ONLINE'])
+# Result: 4 active vehicles (SWM001, SWM002, SWM003, SWM004)
+```
+
+**Step 3: Distribute Clusters to Active Vehicles**
+```python
+clusters_per_vehicle = 7 // 4  # = 1 cluster per vehicle
+remaining_clusters = 7 % 4     # = 3 extra clusters
+
+# Distribution:
+# Vehicle SWM001: clusters 0, 1 (2 clusters, 400 buildings, 2 trips)
+# Vehicle SWM002: clusters 2, 3 (2 clusters, 400 buildings, 2 trips)
+# Vehicle SWM003: clusters 4, 5 (2 clusters, 400 buildings, 2 trips)
+# Vehicle SWM004: cluster 6 (1 cluster, 200 buildings, 1 trip)
+```
+
+**Step 4: Generate Routes**
+```python
+for vehicle in active_vehicles:
+    for cluster in vehicle.assigned_clusters:
+        trip = create_trip(
+            trip_id=f"{vehicle.id}_cluster_{cluster.id}_trip_1",
+            houses=cluster.buildings,
+            route=optimize_route(cluster.buildings, road_network)
+        )
+```
+
+### Final Output
+
+**Clusters Created**: 7 fixed spatial clusters
+**Active Vehicles**: 4 vehicles with route assignments
+**Total Trips**: 7 trips covering all 1400 buildings
+
+| Vehicle | Status | Clusters | Buildings | Trips |
+|---------|--------|----------|-----------|-------|
+| SWM001  | ACTIVE | 0, 1     | 400       | 2     |
+| SWM002  | ACTIVE | 2, 3     | 400       | 2     |
+| SWM003  | ACTIVE | 4, 5     | 400       | 2     |
+| SWM004  | ACTIVE | 6        | 200       | 1     |
+| SWM005  | INACTIVE | -      | -         | 0     |
+| SWM006  | INACTIVE | -      | -         | 0     |
+| SWM007  | INACTIVE | -      | -         | 0     |
+
+**Key Points:**
+- ✅ All 7 clusters are covered by 4 active vehicles
+- ✅ Inactive vehicles (SWM005-007) receive no route assignments
+- ✅ Cluster boundaries remain fixed even if vehicles change status
+- ✅ Workload is distributed fairly among active vehicles
 
 ## Performance
 
@@ -394,12 +514,88 @@ services:
 
 - 🌐 **Live Vehicle Integration**: Real-time SWM API with JWT authentication
 - 🗺️ **Interactive Maps**: Folium-based visualization with cluster controls
-- 🚛 **Capacity Optimization**: Multi-trip assignment based on vehicle capacity
+- 🚛 **Two-Phase Clustering**: Clusters based on total vehicles, routes assigned to active only
 - 📍 **OSRM Routing**: Real-world driving directions and navigation
 - ⏰ **Automatic Scheduling**: Daily data fetch at 5:30 AM
 - 🔐 **Secure API**: Bearer token authentication for all endpoints
 - 📊 **Ward-based Filtering**: Target specific wards for optimization
 - 🎯 **Geospatial AI**: NetworkX graphs, spatial clustering, and VRP solving
+- ✅ **Status-Aware**: Only active vehicles receive route assignments
+- 🔄 **Scalable**: Easy to activate/deactivate vehicles without re-clustering
+
+## Troubleshooting
+
+### No Active Vehicles Error
+
+**Problem**: API returns "No ACTIVE vehicles found in ward X"
+
+**Solution**:
+```json
+{
+  "status": "error",
+  "error_type": "no_active_vehicles",
+  "message": "No ACTIVE vehicles found in ward 1. Cannot generate routes.",
+  "total_vehicles_in_ward": 7,
+  "active_vehicles": 0,
+  "status_distribution": {
+    "INACTIVE": 5,
+    "MAINTENANCE": 2
+  },
+  "recommendation": "Please activate vehicles or check vehicle status in the ward to generate routes."
+}
+```
+
+**Actions**:
+1. Check vehicle status in the SWM system
+2. Activate at least one vehicle in the ward
+3. Valid active statuses: ACTIVE, AVAILABLE, ONLINE, READY, OPERATIONAL, IN_SERVICE
+
+### Cluster Count vs Route Count Mismatch
+
+**Expected Behavior**:
+- Clusters created = Total vehicles (active + inactive)
+- Routes assigned = Active vehicles only
+- Each active vehicle may handle multiple clusters
+
+**Example**:
+```
+Total vehicles: 7 (4 active, 3 inactive)
+Clusters created: 7
+Routes assigned: 4 (one per active vehicle)
+Clusters per vehicle: ~2 clusters per active vehicle
+```
+
+### CSV Upload vs Live API
+
+**CSV Upload Mode**:
+- Uses ONLY vehicles from uploaded CSV
+- No API calls made
+- All vehicles in CSV are used for clustering
+- Filter by status in CSV for active vehicles
+
+**Live API Mode** (no CSV uploaded):
+- Fetches vehicles from SWM API by ward number
+- Requires valid ward_no parameter
+- Automatically filters by ward
+- Uses two-phase clustering (total for clusters, active for routes)
+
+### Map Not Displaying
+
+**Issue**: `/generate-map` returns 404
+
+**Cause**: Map files are auto-deleted after serving
+
+**Solution**: Run `/optimize-routes` again to regenerate the map
+
+### Token Expiration
+
+**Issue**: API calls fail with 401 Unauthorized
+
+**Solution**: Token auto-refreshes, but you can manually refresh:
+```bash
+curl -X POST "http://localhost:8081/api/auth/token/refresh" \
+  -H "Authorization: Bearer swm-2024-secure-key"
+```
 
 ## License
 
