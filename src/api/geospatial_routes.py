@@ -138,17 +138,17 @@ async def optimize_routes(
     roads_file: UploadFile = File(..., description="Roads GeoJSON file"),
     buildings_file: UploadFile = File(..., description="Buildings GeoJSON file"), 
     ward_geojson: UploadFile = File(..., description="Ward boundary GeoJSON file"),
-    ward_no: str = Form(..., description="Ward number to filter vehicles"),
+    wardNo: str = Form(..., description="Ward number to filter vehicles"),
     vehicles_csv: UploadFile = File(None, description="Optional vehicles CSV file (uses live API if not provided)")
 ):
     """Upload files and run complete route optimization pipeline."""
     
-    # Validate file types and ward_no
+    # Validate file types and wardNo
     if not roads_file.filename or not roads_file.filename.lower().endswith('.geojson'):
         raise HTTPException(status_code=400, detail="Roads file must be GeoJSON")
     if not buildings_file.filename or not buildings_file.filename.lower().endswith('.geojson'):
         raise HTTPException(status_code=400, detail="Buildings file must be GeoJSON")
-    if not ward_no or not ward_no.strip():
+    if not wardNo or not wardNo.strip():
         raise HTTPException(status_code=400, detail="Ward number is required")
     
     # Create temporary directory for processing
@@ -193,20 +193,20 @@ async def optimize_routes(
                     vehicle_source = "Uploaded CSV File"
                     logger.info(f"[CSV] Using {len(vehicles_df)} vehicles from CSV - NO API calls")
                 else:
-                    # No CSV: Call live API only with valid ward_no
-                    if not ward_no or ward_no.strip() in ["string", ""]:
+                    # No CSV: Call live API only with valid wardNo
+                    if not wardNo or wardNo.strip() in ["string", ""]:
                         raise HTTPException(status_code=400, detail="Valid ward number required when no CSV provided")
                     
                     # Get ALL vehicles in ward (including INACTIVE) - filtering happens later
-                    vehicles_df = vehicle_service.get_vehicles_by_ward(ward_no.strip(), include_all_status=True)
+                    vehicles_df = vehicle_service.get_vehicles_by_ward(wardNo.strip(), include_all_status=True)
                     vehicles_csv_path = os.path.join(temp_dir, "vehicles.csv")
                     vehicles_df.to_csv(vehicles_csv_path, index=False)
                     vehicles_path = vehicles_csv_path
                     vehicle_source = "Live API (Ward Filtered - All Status)"
-                    logger.info(f"[API] Using {len(vehicles_df)} vehicles from ward {ward_no} (all statuses)")
+                    logger.info(f"[API] Using {len(vehicles_df)} vehicles from ward {wardNo} (all statuses)")
                 
                 if len(vehicles_df) == 0:
-                    source = "CSV file" if vehicles_csv and vehicles_csv.filename else f"ward {ward_no}"
+                    source = "CSV file" if vehicles_csv and vehicles_csv.filename else f"ward {wardNo}"
                     raise HTTPException(status_code=404, detail=f"No vehicles found in {source}")
                 
                 # Filter for ACTIVE vehicles only - exclude INACTIVE and invalid statuses
@@ -225,8 +225,8 @@ async def optimize_routes(
                         content={
                             "status": "error",
                             "error_type": "no_active_vehicles",
-                            "message": f"No ACTIVE vehicles found in ward {ward_no}. Cannot generate routes.",
-                            "ward_no": ward_no,
+                            "message": f"No ACTIVE vehicles found in ward {wardNo}. Cannot generate routes.",
+                            "wardNo": wardNo,
                             "total_vehicles_in_ward": len(vehicles_df),
                             "active_vehicles": 0,
                             "status_distribution": status_distribution,
@@ -240,8 +240,8 @@ async def optimize_routes(
                 from src.clustering.assign_buildings import BuildingClusterer
                 clusterer = BuildingClusterer()
                 
-                if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
-                    buildings_gdf['wardNo'] = ward_no
+                if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
+                    buildings_gdf['wardNo'] = wardNo
                 
                 # Create clusters based on TOTAL vehicles (all statuses)
                 total_vehicles_count = len(vehicles_df)
@@ -345,7 +345,7 @@ async def optimize_routes(
             import json
             with open("output/optimization_result.json", "w") as f:
                 json.dump(convert_numpy_types({
-                    "ward_no": ward_no,
+                    "wardNo": wardNo,
                     "active_vehicles": optimization_result['active_vehicles'],
                     "total_houses": optimization_result['total_houses'],
                     "route_assignments": {k: {
@@ -393,7 +393,7 @@ async def optimize_routes(
                     "route_map": "/generate-map"
                 },
                 "dashboard": "/cluster-dashboard",
-                "ward_no": ward_no,
+                "wardNo": wardNo,
                 "total_vehicles_in_ward": optimization_result['total_vehicles_in_ward'],
                 "active_vehicles": optimization_result['active_vehicles'],
                 "clusters_created": optimization_result['clusters_created'],
@@ -439,6 +439,7 @@ class RoadSegment(BaseModel):
     start_coordinate: Coordinate
     end_coordinate: Coordinate
     distance_meters: float
+    house_count: int
 
 class VehicleInfo(BaseModel):
     vehicle_id: str
@@ -453,6 +454,7 @@ class ClusterBounds(BaseModel):
     max_latitude: float
 
 class ClusterRoadsResponse(BaseModel):
+    wardNo: str
     cluster_id: int
     vehicle_info: VehicleInfo
     buildings_count: int
@@ -479,16 +481,24 @@ async def get_cluster_roads(cluster_id: int):
     """Get cluster roads with coordinates for a specific cluster.
     
     Returns all road segments within the cluster along with their start/end coordinates.
-    Each road segment includes the geographic coordinates and distance in meters.
+    Each road segment includes the geographic coordinates, distance in meters, house count, and ward number.
     """
     try:
         # Load processed data from output directory
         roads_path = os.path.join("output", "roads.geojson")
         buildings_path = os.path.join("output", "buildings.geojson")
         vehicles_path = os.path.join("output", "vehicles.csv")
+        optimization_path = os.path.join("output", "optimization_result.json")
         
         if not all(os.path.exists(p) for p in [roads_path, buildings_path, vehicles_path]):
             raise HTTPException(status_code=404, detail="Cluster data not found. Run /optimize-routes first")
+        
+        # Load optimization result to get wardNo
+        wardNo = "1"
+        if os.path.exists(optimization_path):
+            with open(optimization_path, 'r') as f:
+                optimization_result = json.load(f)
+                wardNo = optimization_result.get('wardNo', '1')
         
         # Load data
         roads_gdf = gpd.read_file(roads_path)
@@ -513,7 +523,7 @@ async def get_cluster_roads(cluster_id: int):
         from src.clustering.assign_buildings import BuildingClusterer
         clusterer = BuildingClusterer()
         
-        if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
+        if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
             buildings_gdf['wardNo'] = '1'
         
         clustered_buildings = clusterer.cluster_buildings_with_vehicles(buildings_gdf, active_vehicles)
@@ -559,8 +569,10 @@ async def get_cluster_roads(cluster_id: int):
         cluster_road_points = list(set(road_coordinates))
         house_locations = [(pt.x, pt.y) for pt in cluster_buildings.geometry.centroid]
         
-        # Find nearest road points to houses
+        # Find nearest road points to houses and count houses per road segment
         cluster_roads = []
+        road_segment_houses = {}  # Track house count per road segment
+        
         for house_pt in house_locations:
             if cluster_road_points:
                 distances = [((house_pt[0]-rp[0])**2 + (house_pt[1]-rp[1])**2)**0.5 for rp in cluster_road_points]
@@ -569,18 +581,24 @@ async def get_cluster_roads(cluster_id: int):
                 
                 # Find all road segments connected to this point
                 for edge in G.edges(nearest_road_point, data=True):
-                    road_segment = {
-                        "start_coordinate": {"longitude": float(edge[0][0]), "latitude": float(edge[0][1])},
-                        "end_coordinate": {"longitude": float(edge[1][0]), "latitude": float(edge[1][1])},
-                        "distance_meters": float(edge[2]['weight'] * 111000)  # Approximate conversion
-                    }
-                    if road_segment not in cluster_roads:
-                        cluster_roads.append(road_segment)
+                    segment_key = (edge[0], edge[1])
+                    road_segment_houses[segment_key] = road_segment_houses.get(segment_key, 0) + 1
+        
+        # Build road segments with house counts
+        for segment_key, house_count in road_segment_houses.items():
+            road_segment = {
+                "start_coordinate": {"longitude": float(segment_key[0][0]), "latitude": float(segment_key[0][1])},
+                "end_coordinate": {"longitude": float(segment_key[1][0]), "latitude": float(segment_key[1][1])},
+                "distance_meters": float(G[segment_key[0]][segment_key[1]]['weight'] * 111000),
+                "house_count": house_count
+            }
+            cluster_roads.append(road_segment)
         
         # Get vehicle info
         vehicle_info = active_vehicles.iloc[cluster_id] if cluster_id < len(active_vehicles) else {}
         
         response_data = {
+            "wardNo": wardNo,
             "cluster_id": cluster_id,
             "vehicle_info": {
                 "vehicle_id": str(vehicle_info.get('vehicle_id', f'vehicle_{cluster_id}')),
@@ -615,7 +633,7 @@ async def get_cluster_route_coordinates():
     """Get road coordinates for every cluster and upload to external URL.
     
     Returns route coordinates for all clusters with vehicle information,
-    route names, and coordinate details including timestamps.
+    route names, coordinate details including timestamps, house count, and ward number.
     """
     try:
         roads_path = os.path.join("output", "roads.geojson")
@@ -625,6 +643,14 @@ async def get_cluster_route_coordinates():
         
         if not all(os.path.exists(p) for p in [roads_path, buildings_path, vehicles_path]):
             raise HTTPException(status_code=404, detail="Cluster data not found. Run /optimize-routes first")
+        
+        # Load optimization result to get wardNo
+        wardNo = "1"
+        if os.path.exists(optimization_path):
+            with open(optimization_path, 'r') as f:
+                optimization_result_data = json.load(f)
+                wardNo = optimization_result_data.get('wardNo', '1')
+        
         
         roads_gdf = gpd.read_file(roads_path)
         buildings_gdf = gpd.read_file(buildings_path)
@@ -685,18 +711,19 @@ async def get_cluster_route_coordinates():
                             house_coords.append((pt.x, pt.y))
                     
                     if house_coords:
-                        # Generate road route coordinates
-                        route_coords = []
+                        # Generate road route coordinates with house counts per segment
                         road_points = list(set(road_coordinates))
                         
-                        # Create route through nearest road points
-                        route_path = []
+                        # Track house count per road point
+                        road_point_houses = {}
                         for house_coord in house_coords:
                             if road_points:
                                 distances = [((house_coord[0]-rp[0])**2 + (house_coord[1]-rp[1])**2)**0.5 for rp in road_points]
                                 nearest_road = road_points[np.argmin(distances)]
-                                if nearest_road not in route_path:
-                                    route_path.append(nearest_road)
+                                road_point_houses[nearest_road] = road_point_houses.get(nearest_road, 0) + 1
+                        
+                        # Create route through nearest road points
+                        route_path = list(road_point_houses.keys())
                         
                         # Add road segments between points
                         full_route = []
@@ -709,30 +736,34 @@ async def get_cluster_route_coordinates():
                                 except:
                                     pass
                         
-                        # Convert to coordinates with timestamps
-                        for i, coord in enumerate(full_route):
-                            minutes_elapsed = i * 1  # 1 minute per road point
-                            hours = 8 + (minutes_elapsed // 60)
-                            mins = minutes_elapsed % 60
-                            time_str = f"{hours:02d}:{mins:02d}:00"
-                            
-                            route_coords.append({
-                                "lat": coord[1],
-                                "lon": coord[0],
-                                "time": time_str
-                            })
+                        # Build road segments with house counts
+                        road_segments = []
+                        for i in range(len(full_route) - 1):
+                            p1, p2 = full_route[i], full_route[i+1]
+                            if G.has_edge(p1, p2):
+                                segment_houses = road_point_houses.get(p1, 0) + road_point_houses.get(p2, 0)
+                                distance_meters = G[p1][p2]['weight'] * 111000
+                                
+                                road_segments.append({
+                                    "coordinates": [
+                                        {"longitude": float(p1[0]), "latitude": float(p1[1])},
+                                        {"longitude": float(p2[0]), "latitude": float(p2[1])}
+                                    ],
+                                    "house_count": segment_houses
+                                })
                         
                         cluster_routes.append({
                             "vehicleNumber": str(vehicle_info['vehicle_id']),
                             "routeName": f"Route-{vehicle_id}-Trip-{trip_idx + 1}",
-                            "coordinates": route_coords
+                            "segments": road_segments,
+                            "house_count": len(house_coords)
                         })
         else:
             # Use fixed clustering for consistency
             from src.clustering.assign_buildings import BuildingClusterer
             clusterer = BuildingClusterer()
             
-            if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
+            if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
                 buildings_gdf['wardNo'] = '1'
             
             clustered_buildings = clusterer.cluster_buildings_with_vehicles(buildings_gdf, active_vehicles)
@@ -755,17 +786,18 @@ async def get_cluster_route_coordinates():
                         pt = buildings_gdf.iloc[i].geometry.centroid
                         house_coords.append((pt.x, pt.y))
                     
-                    route_coords = []
                     road_points = list(set(road_coordinates))
                     
-                    # Create route through nearest road points
-                    route_path = []
+                    # Track house count per road point
+                    road_point_houses = {}
                     for house_coord in house_coords:
                         if road_points:
                             distances = [((house_coord[0]-rp[0])**2 + (house_coord[1]-rp[1])**2)**0.5 for rp in road_points]
                             nearest_road = road_points[np.argmin(distances)]
-                            if nearest_road not in route_path:
-                                route_path.append(nearest_road)
+                            road_point_houses[nearest_road] = road_point_houses.get(nearest_road, 0) + 1
+                    
+                    # Create route through nearest road points
+                    route_path = list(road_point_houses.keys())
                     
                     # Add road segments between points
                     full_route = []
@@ -778,24 +810,28 @@ async def get_cluster_route_coordinates():
                             except:
                                 pass
                     
-                    # Convert to coordinates with timestamps
-                    for i, coord in enumerate(full_route):
-                        minutes_elapsed = i * 1
-                        hours = 8 + (minutes_elapsed // 60)
-                        mins = minutes_elapsed % 60
-                        time_str = f"{hours:02d}:{mins:02d}:00"
-                        
-                        route_coords.append({
-                            "lat": coord[1],
-                            "lon": coord[0],
-                            "time": time_str
-                        })
+                    # Build road segments with house counts
+                    road_segments = []
+                    for i in range(len(full_route) - 1):
+                        p1, p2 = full_route[i], full_route[i+1]
+                        if G.has_edge(p1, p2):
+                            segment_houses = road_point_houses.get(p1, 0) + road_point_houses.get(p2, 0)
+                            distance_meters = G[p1][p2]['weight'] * 111000
+                            
+                            road_segments.append({
+                                "coordinates": [
+                                    {"longitude": float(p1[0]), "latitude": float(p1[1])},
+                                    {"longitude": float(p2[0]), "latitude": float(p2[1])}
+                                ],
+                                "house_count": segment_houses
+                            })
                     
                     vehicle_info = active_vehicles.iloc[cluster_id] if cluster_id < len(active_vehicles) else {}
                     cluster_routes.append({
                         "vehicleNumber": str(vehicle_info.get('vehicle_id', f'vehicle_{cluster_id}')),
                         "routeName": f"Route-Cluster-{cluster_id + 1}",
-                        "coordinates": route_coords
+                        "segments": road_segments,
+                        "house_count": len(house_coords)
                     })
         
         # Upload data to external URL
@@ -807,8 +843,14 @@ async def get_cluster_route_coordinates():
             swm_token = os.getenv('SWM_TOKEN')
             
             if external_url and swm_token:
-                # Clean the URL (remove any trailing quote)
-                external_url = external_url.rstrip("'")
+                # Clean the URL and ensure proper endpoint
+                external_url = external_url.rstrip("'").rstrip('/')
+                
+                # Add the correct endpoint path if not present
+                if not external_url.endswith('/api/vehicle-routes/upload-data'):
+                    external_url = external_url + '/api/vehicle-routes/upload-data'
+                
+                logger.info(f"Upload URL: {external_url}")
                 
                 headers = {
                     'Authorization': 'Bearer ' + swm_token.strip("'\""),
@@ -817,53 +859,96 @@ async def get_cluster_route_coordinates():
                 
                 logger.info(f"Uploading {len(cluster_routes)} routes to {external_url}")
                 
+                # Log sample payload for debugging
+                if cluster_routes:
+                    sample = cluster_routes[0]
+                    logger.debug(f"Sample payload structure: vehicleNumber={sample.get('vehicleNumber')}, routeName={sample.get('routeName')}, coords={len(sample.get('coordinates', []))}")
+                
                 # Upload each route individually with retry logic
-                for route in cluster_routes:
+                from datetime import datetime
+                import time
+                for route_idx, route in enumerate(cluster_routes):
                     success = False
-                    for attempt in range(3):  # 3 retry attempts
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{route_idx:03d}"
+                    route['routeName'] = f"{route['routeName']}-{timestamp}"
+                    
+                    logger.debug(f"Uploading route: {route['routeName']}, coordinates: {len(route['coordinates'])}")
+                    
+                    # Create clean payload with wardNo and segments
+                    payload = {
+                        "wardNo": wardNo,
+                        "vehicleNumber": route['vehicleNumber'],
+                        "routeName": route['routeName'],
+                        "segments": route['segments']
+                    }
+                    
+                    for attempt in range(3):
                         try:
                             response = requests.post(
                                 external_url,
-                                json=route,
+                                json=payload,
                                 headers=headers,
-                                timeout=60  # Increased timeout
+                                timeout=60
                             )
+                            
                             if response.status_code in [200, 201]:
                                 upload_status["uploaded_count"] += 1
-                                upload_status["details"].append({"route": route['routeName'], "status": "success", "code": response.status_code})
+                                upload_status["details"].append({"route": route['routeName'], "status": "success"})
                                 success = True
-                                logger.info(f"✅ Uploaded route {route['routeName']}: {response.status_code}")
+                                logger.info(f"Uploaded {route['routeName']}")
                                 break
-                            elif response.status_code == 409:  # Conflict - already exists
+                            elif response.status_code == 409:
                                 upload_status["uploaded_count"] += 1
-                                upload_status["details"].append({"route": route['routeName'], "status": "already_exists", "code": response.status_code})
+                                upload_status["details"].append({"route": route['routeName'], "status": "exists"})
                                 success = True
-                                logger.info(f"📝 Route {route['routeName']} already exists: {response.status_code}")
+                                logger.info(f"{route['routeName']} already exists")
                                 break
                             else:
-                                logger.warning(f"⚠️ Attempt {attempt + 1} failed for {route['routeName']}: {response.status_code} - {response.text[:100]}")
-                                if attempt == 2:  # Last attempt
+                                error_msg = response.text[:200] if response.text else "No error message"
+                                if 'duplicate' in error_msg.lower() and attempt < 2:
+                                    time.sleep(0.1)
+                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:17] + f"_{route_idx:03d}"
+                                    route['routeName'] = f"{route['routeName'].rsplit('-', 1)[0]}-{timestamp}"
+                                    continue
+                                if attempt < 2:
+                                    logger.debug(f"Attempt {attempt + 1} failed: {response.status_code}")
+                                
+                                if attempt == 2:
                                     upload_status["failed_count"] += 1
-                                    upload_status["details"].append({"route": route['routeName'], "status": "failed", "code": response.status_code, "response": response.text[:200]})
+                                    upload_status["details"].append({
+                                        "route": route['routeName'],
+                                        "status": "failed",
+                                        "code": response.status_code,
+                                        "error": error_msg
+                                    })
                         except Exception as route_error:
-                            logger.warning(f"⚠️ Attempt {attempt + 1} error for {route['routeName']}: {route_error}")
-                            if attempt == 2:  # Last attempt
+                            logger.warning(f"Attempt {attempt + 1} error: {str(route_error)[:100]}")
+                            if attempt == 2:
                                 upload_status["failed_count"] += 1
-                                upload_status["details"].append({"route": route['routeName'], "status": "error", "error": str(route_error)})
+                                upload_status["details"].append({
+                                    "route": route['routeName'],
+                                    "status": "error",
+                                    "error": str(route_error)[:200]
+                                })
                     
                     if not success:
-                        logger.error(f"❌ Failed to upload route {route['routeName']} after 3 attempts")
+                        logger.error(f"Failed to upload {route['routeName']} after 3 attempts")
                 
                 upload_status["success"] = upload_status["failed_count"] == 0
                 logger.info(f"Upload complete: {upload_status['uploaded_count']} success, {upload_status['failed_count']} failed")
             else:
-                upload_status["details"].append({"status": "skipped", "reason": "External upload URL or token not configured"})
-                logger.warning("External upload URL or token not configured")
+                upload_status["details"].append({"status": "skipped", "reason": "URL or token not configured"})
+                logger.warning("Upload skipped: URL or token not configured")
         except Exception as upload_error:
             upload_status["details"].append({"status": "error", "error": str(upload_error)})
             logger.error(f"Failed to upload to external URL: {upload_error}")
         
+        # Calculate total houses count
+        total_houses = sum(route.get('house_count', 0) for route in cluster_routes)
+        
         return JSONResponse(convert_numpy_types({
+            "wardNo": wardNo,
+            "total_houses": total_houses,
             "routes": cluster_routes,
             "upload_status": upload_status
         }))
@@ -879,15 +964,23 @@ async def get_all_cluster_roads():
     """Get cluster roads with coordinates for all clusters.
     
     Returns all road segments within each cluster along with their start/end coordinates.
-    Each road segment includes the geographic coordinates and distance in meters.
+    Each road segment includes the geographic coordinates, distance in meters, house count, and ward number.
     """
     try:
         roads_path = os.path.join("output", "roads.geojson")
         buildings_path = os.path.join("output", "buildings.geojson")
         vehicles_path = os.path.join("output", "vehicles.csv")
+        optimization_path = os.path.join("output", "optimization_result.json")
         
         if not all(os.path.exists(p) for p in [roads_path, buildings_path, vehicles_path]):
             raise HTTPException(status_code=404, detail="Cluster data not found. Run /optimize-routes first")
+        
+        # Load optimization result to get wardNo
+        wardNo = "1"
+        if os.path.exists(optimization_path):
+            with open(optimization_path, 'r') as f:
+                optimization_result = json.load(f)
+                wardNo = optimization_result.get('wardNo', '1')
         
         roads_gdf = gpd.read_file(roads_path)
         buildings_gdf = gpd.read_file(buildings_path)
@@ -906,7 +999,7 @@ async def get_all_cluster_roads():
         from src.clustering.assign_buildings import BuildingClusterer
         clusterer = BuildingClusterer()
         
-        if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
+        if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
             buildings_gdf['wardNo'] = '1'
         
         clustered_buildings = clusterer.cluster_buildings_with_vehicles(buildings_gdf, active_vehicles)
@@ -956,7 +1049,8 @@ async def get_all_cluster_roads():
                     pt = buildings_gdf.iloc[i].geometry.centroid
                     house_locations_wgs84.append((pt.x, pt.y))
             
-            cluster_roads = []
+            # Track house count per road segment
+            road_segment_houses = {}
             for house_pt in house_locations_wgs84:
                 if cluster_road_points:
                     distances = [((house_pt[0]-rp[0])**2 + (house_pt[1]-rp[1])**2)**0.5 for rp in cluster_road_points]
@@ -964,17 +1058,24 @@ async def get_all_cluster_roads():
                     nearest_road_point = cluster_road_points[nearest_idx]
                     
                     for edge in G.edges(nearest_road_point, data=True):
-                        road_segment = {
-                            "start_coordinate": {"longitude": float(edge[0][0]), "latitude": float(edge[0][1])},
-                            "end_coordinate": {"longitude": float(edge[1][0]), "latitude": float(edge[1][1])},
-                            "distance_meters": float(edge[2]['weight'] * 111000)
-                        }
-                        if road_segment not in cluster_roads:
-                            cluster_roads.append(road_segment)
+                        segment_key = (edge[0], edge[1])
+                        road_segment_houses[segment_key] = road_segment_houses.get(segment_key, 0) + 1
+            
+            # Build road segments with house counts
+            cluster_roads = []
+            for segment_key, house_count in road_segment_houses.items():
+                road_segment = {
+                    "start_coordinate": {"longitude": float(segment_key[0][0]), "latitude": float(segment_key[0][1])},
+                    "end_coordinate": {"longitude": float(segment_key[1][0]), "latitude": float(segment_key[1][1])},
+                    "distance_meters": float(G[segment_key[0]][segment_key[1]]['weight'] * 111000),
+                    "house_count": house_count
+                }
+                cluster_roads.append(road_segment)
             
             vehicle_info = active_vehicles.iloc[cluster_id] if cluster_id < len(active_vehicles) else {}
             
             cluster_data = {
+                "wardNo": wardNo,
                 "cluster_id": cluster_id,
                 "vehicle_info": {
                     "vehicle_id": str(vehicle_info.get('vehicle_id', f'vehicle_{cluster_id}')),
@@ -1082,7 +1183,7 @@ def generate_map_from_files(ward_file, roads_file, buildings_file, vehicles_file
         clusterer = BuildingClusterer()
         
         # Add ward info if not present
-        if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
+        if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
             buildings_gdf['wardNo'] = '1'  # Default ward for map generation
         
         # Apply fixed clustering using provided vehicles (no API calls)
@@ -1102,7 +1203,7 @@ def generate_map_from_files(ward_file, roads_file, buildings_file, vehicles_file
         from src.clustering.assign_buildings import BuildingClusterer
         clusterer = BuildingClusterer()
         
-        if 'wardNo' not in buildings_gdf.columns and 'ward_no' not in buildings_gdf.columns:
+        if 'wardNo' not in buildings_gdf.columns and 'wardNo' not in buildings_gdf.columns:
             buildings_gdf['wardNo'] = '1'
         
         # Create fallback vehicles for map generation
@@ -1430,7 +1531,7 @@ async def root():
             </div>
             <h3>Available Endpoints:</h3>
             <ul>
-                <li><strong>POST /optimize-routes</strong> - Upload files with ward_no and generate optimized routes using live vehicles</li>
+                <li><strong>POST /optimize-routes</strong> - Upload files with wardNo and generate optimized routes using live vehicles</li>
                 <li><strong>GET /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
                 <li><strong>GET /cluster/{cluster_id}</strong> - Get cluster roads with coordinates for specific cluster</li>
                 <li><strong>GET /clusters</strong> - Get cluster roads with coordinates for all clusters</li>
