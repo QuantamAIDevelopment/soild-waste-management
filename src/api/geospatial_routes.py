@@ -831,7 +831,7 @@ async def get_cluster_route_coordinates():
                         "vehicleNumber": str(vehicle_info.get('vehicle_id', f'vehicle_{cluster_id}')),
                         "routeName": f"Route-Cluster-{cluster_id + 1}",
                         "segments": road_segments,
-                        "house_count": len(house_coords)
+                        "no_of_houses": len(house_coords)
                     })
         
         # Upload data to external URL
@@ -862,7 +862,7 @@ async def get_cluster_route_coordinates():
                 # Log sample payload for debugging
                 if cluster_routes:
                     sample = cluster_routes[0]
-                    logger.debug(f"Sample payload structure: vehicleNumber={sample.get('vehicleNumber')}, routeName={sample.get('routeName')}, coords={len(sample.get('coordinates', []))}")
+                    logger.debug(f"Sample payload structure: vehicleNumber={sample.get('vehicleNumber')}, routeName={sample.get('routeName')}, segments={len(sample.get('segments', []))}")
                 
                 # Upload each route individually with retry logic
                 from datetime import datetime
@@ -872,18 +872,34 @@ async def get_cluster_route_coordinates():
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{route_idx:03d}"
                     route['routeName'] = f"{route['routeName']}-{timestamp}"
                     
-                    logger.debug(f"Uploading route: {route['routeName']}, coordinates: {len(route['coordinates'])}")
+                    logger.debug(f"Uploading route: {route['routeName']}, segments: {len(route.get('segments', []))}")
                     
                     # Create clean payload with wardNo and segments
                     payload = {
                         "wardNo": wardNo,
                         "vehicleNumber": route['vehicleNumber'],
                         "routeName": route['routeName'],
-                        "segments": route['segments']
+                        "segments": route['segments'],
+                        "no_of_houses": route.get('no_of_houses', route.get('house_count', 0))
                     }
                     
-                    for attempt in range(3):
+                    # Print payload details for debugging
+                    print(f"\n=== Sending to External API ===")
+                    print(f"Route: {route['routeName']}")
+                    print(f"Vehicle: {route['vehicleNumber']}")
+                    print(f"Ward: {wardNo}")
+                    print(f"Houses in this route: {route.get('no_of_houses', route.get('house_count', 0))}")
+                    print(f"Segments: {len(route.get('segments', []))}")
+                    print(f"================================\n")
+                    
+                    for attempt in range(5):
                         try:
+                            # Exponential backoff: 1s, 2s, 4s, 8s
+                            if attempt > 0:
+                                wait_time = 2 ** (attempt - 1)
+                                logger.debug(f"Waiting {wait_time}s before retry {attempt + 1}")
+                                time.sleep(wait_time)
+                            
                             response = requests.post(
                                 external_url,
                                 json=payload,
@@ -904,35 +920,42 @@ async def get_cluster_route_coordinates():
                                 logger.info(f"{route['routeName']} already exists")
                                 break
                             else:
-                                error_msg = response.text[:200] if response.text else "No error message"
-                                if 'duplicate' in error_msg.lower() and attempt < 2:
-                                    time.sleep(0.1)
-                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:17] + f"_{route_idx:03d}"
-                                    route['routeName'] = f"{route['routeName'].rsplit('-', 1)[0]}-{timestamp}"
-                                    continue
-                                if attempt < 2:
-                                    logger.debug(f"Attempt {attempt + 1} failed: {response.status_code}")
+                                error_body = response.text[:500] if response.text else "No response body"
+                                logger.warning(f"Attempt {attempt + 1} failed: {response.status_code} - {error_body}")
                                 
-                                if attempt == 2:
+                                if attempt == 4:
                                     upload_status["failed_count"] += 1
                                     upload_status["details"].append({
                                         "route": route['routeName'],
                                         "status": "failed",
                                         "code": response.status_code,
-                                        "error": error_msg
+                                        "error": error_body
                                     })
-                        except Exception as route_error:
-                            logger.warning(f"Attempt {attempt + 1} error: {str(route_error)[:100]}")
-                            if attempt == 2:
+                        except requests.exceptions.Timeout:
+                            logger.warning(f"Attempt {attempt + 1} timeout after 60s")
+                            if attempt == 4:
                                 upload_status["failed_count"] += 1
                                 upload_status["details"].append({
                                     "route": route['routeName'],
                                     "status": "error",
-                                    "error": str(route_error)[:200]
+                                    "error": "Request timeout after 60 seconds"
+                                })
+                        except Exception as route_error:
+                            logger.warning(f"Attempt {attempt + 1} error: {str(route_error)[:200]}")
+                            if attempt == 4:
+                                upload_status["failed_count"] += 1
+                                upload_status["details"].append({
+                                    "route": route['routeName'],
+                                    "status": "error",
+                                    "error": str(route_error)[:300]
                                 })
                     
                     if not success:
-                        logger.error(f"Failed to upload {route['routeName']} after 3 attempts")
+                        logger.error(f"Failed to upload {route['routeName']} after 5 attempts")
+                    
+                    # Add delay between route uploads to avoid overwhelming server
+                    if route_idx < len(cluster_routes) - 1:
+                        time.sleep(0.5)
                 
                 upload_status["success"] = upload_status["failed_count"] == 0
                 logger.info(f"Upload complete: {upload_status['uploaded_count']} success, {upload_status['failed_count']} failed")
