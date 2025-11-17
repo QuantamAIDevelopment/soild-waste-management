@@ -212,7 +212,7 @@ async def optimize_routes(
                 # Filter for ACTIVE vehicles only - exclude INACTIVE and invalid statuses
                 active_vehicles = vehicles_df[
                     vehicles_df['status'].notna() & 
-                    (vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE', 'READY', 'OPERATIONAL', 'IN_SERVICE']))
+                    (vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE', 'READY', 'OPERATIONAL', 'IN_SERVICE', 'HALTED', 'IDEL']))
                 ]
                 
                 if len(active_vehicles) == 0:
@@ -892,19 +892,18 @@ async def get_cluster_route_coordinates():
                     print(f"Segments: {len(route.get('segments', []))}")
                     print(f"================================\n")
                     
-                    for attempt in range(5):
+                    for attempt in range(3):
                         try:
-                            # Exponential backoff: 1s, 2s, 4s, 8s
                             if attempt > 0:
-                                wait_time = 2 ** (attempt - 1)
-                                logger.debug(f"Waiting {wait_time}s before retry {attempt + 1}")
+                                wait_time = 2 ** attempt
+                                logger.debug(f"Retry {attempt + 1} after {wait_time}s")
                                 time.sleep(wait_time)
                             
                             response = requests.post(
                                 external_url,
                                 json=payload,
                                 headers=headers,
-                                timeout=60
+                                timeout=30
                             )
                             
                             if response.status_code in [200, 201]:
@@ -921,41 +920,35 @@ async def get_cluster_route_coordinates():
                                 break
                             else:
                                 error_body = response.text[:500] if response.text else "No response body"
-                                logger.warning(f"Attempt {attempt + 1} failed: {response.status_code} - {error_body}")
-                                
-                                if attempt == 4:
+                                logger.warning(f"Attempt {attempt + 1}: {response.status_code}")
+                                if attempt == 2:
                                     upload_status["failed_count"] += 1
                                     upload_status["details"].append({
                                         "route": route['routeName'],
                                         "status": "failed",
-                                        "code": response.status_code,
-                                        "error": error_body
+                                        "code": response.status_code
                                     })
                         except requests.exceptions.Timeout:
-                            logger.warning(f"Attempt {attempt + 1} timeout after 60s")
-                            if attempt == 4:
+                            logger.warning(f"Attempt {attempt + 1} timeout")
+                            if attempt == 2:
                                 upload_status["failed_count"] += 1
                                 upload_status["details"].append({
                                     "route": route['routeName'],
-                                    "status": "error",
-                                    "error": "Request timeout after 60 seconds"
+                                    "status": "timeout"
                                 })
                         except Exception as route_error:
-                            logger.warning(f"Attempt {attempt + 1} error: {str(route_error)[:200]}")
-                            if attempt == 4:
+                            logger.warning(f"Attempt {attempt + 1} error")
+                            if attempt == 2:
                                 upload_status["failed_count"] += 1
                                 upload_status["details"].append({
                                     "route": route['routeName'],
-                                    "status": "error",
-                                    "error": str(route_error)[:300]
+                                    "status": "error"
                                 })
                     
                     if not success:
-                        logger.error(f"Failed to upload {route['routeName']} after 5 attempts")
-                    
-                    # Add delay between route uploads to avoid overwhelming server
-                    if route_idx < len(cluster_routes) - 1:
-                        time.sleep(0.5)
+                        logger.error(f"Failed to upload {route['routeName']} after 3 attempts")
+                    else:
+                        time.sleep(0.2)
                 
                 upload_status["success"] = upload_status["failed_count"] == 0
                 logger.info(f"Upload complete: {upload_status['uploaded_count']} success, {upload_status['failed_count']} failed")
