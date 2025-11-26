@@ -212,13 +212,9 @@ class VehicleService:
     
     def _standardize_vehicle_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """Standardize vehicle data column names and format."""
-        # Preserve all live API fields and add mappings
-        live_api_fields = ['vehicleId', 'vehicleNo', 'driverName', 'imeiN', 'phoneNo', 'wardNo', 'vehicleType', 'department', 'timestamp']
-        
-        # Keep original fields from API
-        for field in live_api_fields:
-            if field in df.columns:
-                continue  # Keep as-is
+        # Map vehicleType from API to vehicle_type
+        if 'vehicleType' in df.columns and 'vehicle_type' not in df.columns:
+            df['vehicle_type'] = df['vehicleType']
         
         # Add legacy mappings for compatibility
         column_mappings = {
@@ -226,6 +222,7 @@ class VehicleService:
             'vehicle_number': 'vehicle_id',
             'registration_number': 'vehicle_id',
             'wardNumber': 'ward_no',
+            'wardNo': 'ward_no',
             'name': 'vehicle_name',
             'vehicleName': 'vehicle_name',
             'type': 'vehicle_type',
@@ -240,31 +237,29 @@ class VehicleService:
         
         # Rename columns
         for old_name, new_name in column_mappings.items():
-            if old_name in df.columns:
+            if old_name in df.columns and new_name not in df.columns:
                 df = df.rename(columns={old_name: new_name})
         
-        # Ensure required columns exist
-        required_columns = ['vehicle_id', 'status']
-        for col in required_columns:
-            if col not in df.columns:
-                if col == 'vehicle_id':
-                    # Use vehicleNo as primary vehicle_id
-                    if 'vehicleNo' in df.columns:
-                        df['vehicle_id'] = df['vehicleNo']
-                    elif 'vehicleId' in df.columns:
-                        df['vehicle_id'] = df['vehicleId']
-                    else:
-                        df['vehicle_id'] = [f"vehicle_{i+1}" for i in range(len(df))]
-                elif col == 'status':
-                    df['status'] = 'active'
+        # Ensure vehicle_id exists
+        if 'vehicle_id' not in df.columns:
+            if 'vehicleNo' in df.columns:
+                df['vehicle_id'] = df['vehicleNo']
+            elif 'vehicleId' in df.columns:
+                df['vehicle_id'] = df['vehicleId']
+            else:
+                df['vehicle_id'] = [f"vehicle_{i+1}" for i in range(len(df))]
         
-        # Add default values for missing columns
+        # Ensure status exists
+        if 'status' not in df.columns:
+            df['status'] = 'active'
+        
+        # Add default values only if missing
         if 'vehicle_type' not in df.columns:
             df['vehicle_type'] = 'garbage_truck'
         if 'capacity' not in df.columns:
-            df['capacity'] = 500  # Default capacity in kg
-        if 'ward_no' not in df.columns:
-            df['ward_no'] = '1'  # Default ward
+            df['capacity'] = 500
+        if 'ward_no' not in df.columns and 'wardNo' not in df.columns:
+            df['ward_no'] = '1'
         
         return df
     
