@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swm-app
+  labels:
+    app: swm
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: swm
+  template:
+    metadata:
+      labels:
+        app: swm
+    spec:
+      containers:
+      - name: swm
+        image: swm-app:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: swm-secrets
+              key: api-key
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
