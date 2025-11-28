@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: quantamaidevelopmentsoildwastemanagement 
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quantamaidevelopmentsoildwastemanagement
+  template:
+    metadata:
+      labels:
+        app: quantamaidevelopmentsoildwastemanagement 
+    spec:
+      containers:
+        - name: quantamaidevelopmentsoildwastemanagement 
+          image: allvysharedacr.azurecr.io/quantamaidevelopmentsoildwastemanagement
+          ports:
+          - containerPort: 8000
