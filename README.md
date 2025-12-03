@@ -132,16 +132,29 @@ All endpoints require Bearer token authentication:
 -H "Authorization: Bearer swm-2024-secure-key"
 ```
 
-### 1. Upload Files and Optimize Routes
+### 1. Optimize Routes (Fetch from API or Upload Files)
+
+**Option A: Fetch All Data from API (Recommended)**
 ```bash
 curl -X POST "http://localhost:8081/optimize-routes" \
   -H "Authorization: Bearer swm-2024-secure-key" \
+  -F "wardNo=Ward 29"
+```
+
+**Option B: Upload Files Manually**
+```bash
+curl -X POST "http://localhost:8081/optimize-routes" \
+  -H "Authorization: Bearer swm-2024-secure-key" \
+  -F "wardNo=Ward 29" \
   -F "roads_file=@roads.geojson" \
   -F "buildings_file=@buildings.geojson" \
-  -F "ward_geojson=@ward.geojson" \
-  -F "ward_no=1" \
-  -F "vehicles_csv=@vehicles.csv"
+  -F "ward_geojson=@ward.geojson"
 ```
+
+**Note**: 
+- Vehicle data is always fetched from live API
+- Ward boundary is fetched from API if not uploaded
+- Buildings and roads must be uploaded if not available in API
 
 **Response Example:**
 ```json
@@ -196,13 +209,44 @@ curl -H "Authorization: Bearer swm-2024-secure-key" \
 }
 ```
 
-### 3. Get Route Coordinates with Timestamps
+### 3. Get All Cluster Roads
+```bash
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/clusters"
+```
+
+### 4. Get Route Coordinates with Timestamps
 ```bash
 curl -H "Authorization: Bearer swm-2024-secure-key" \
   "http://localhost:8081/cluster-routes"
 ```
 
-### 4. Live Vehicle Data
+**Response includes:**
+- Ward number
+- Total houses count
+- Route segments with coordinates
+- House count per segment
+- Auto-upload to external API
+
+### 5. Ward GeoJSON Management
+```bash
+# Upload ward boundary
+curl -X POST "http://localhost:8081/api/ward-geojson/upload" \
+  -H "Authorization: Bearer swm-2024-secure-key" \
+  -F "wardNo=Ward 29" \
+  -F "name=Wardboundary" \
+  -F "geojson_file=@ward29.geojson"
+
+# Get ward boundary
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/ward-geojson/Ward 29"
+
+# List all wards
+curl -H "Authorization: Bearer swm-2024-secure-key" \
+  "http://localhost:8081/api/ward-geojson/list"
+```
+
+### 6. Live Vehicle Data
 ```bash
 # All vehicles
 curl -H "Authorization: Bearer swm-2024-secure-key" \
@@ -213,7 +257,7 @@ curl -H "Authorization: Bearer swm-2024-secure-key" \
   "http://localhost:8081/api/vehicles/ward/1"
 ```
 
-### 5. Scheduler Management
+### 7. Scheduler Management
 ```bash
 # Check scheduler status
 curl -H "Authorization: Bearer swm-2024-secure-key" \
@@ -224,7 +268,7 @@ curl -X POST -H "Authorization: Bearer swm-2024-secure-key" \
   "http://localhost:8081/scheduler/trigger"
 ```
 
-### 6. Interactive Maps
+### 8. Interactive Maps
 - Route Map: `http://localhost:8081/generate-map`
 - API Documentation: `http://localhost:8081/docs`
 
@@ -266,6 +310,42 @@ python test_scheduler.py
 # Check output files
 dir output\vehicles_daily_*.csv
 ```
+
+## API Response Structure
+
+### Ward Data from API
+The API returns ward data in this format:
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": 1,
+      "name": "buildings",
+      "wardNo": "Ward 29",
+      "geojson": "{...buildings GeoJSON...}"
+    },
+    {
+      "id": 2,
+      "name": "roads",
+      "wardNo": "Ward 29",
+      "geojson": "{...roads GeoJSON...}"
+    },
+    {
+      "id": 3,
+      "name": "Wardboundary",
+      "wardNo": "Ward 29",
+      "geojson": "{...boundary GeoJSON...}"
+    }
+  ]
+}
+```
+
+**The system automatically:**
+- Parses the `features` array
+- Extracts each component by `name` field
+- Converts JSON strings to GeoJSON objects
+- Uses them for clustering
 
 ## Input File Formats
 
@@ -322,26 +402,25 @@ SWM002,garbage_truck,1,active,500,Driver2
 - **Graph Construction**: NetworkX graph from road network for routing
 - **Live Data Integration**: Real-time vehicle data with authentication
 
-### 2. Two-Phase Clustering Strategy
+### 2. Clustering Strategy (Swachh Auto Based)
 
-**Phase 1: Create Fixed Clusters (Based on TOTAL Vehicles)**
-- **Cluster Count**: k = total vehicles in ward (ALL statuses: ACTIVE + INACTIVE)
+**Cluster Creation (Based on Swachh Auto Count)**
+- **Vehicle Filter**: Only "Swachh Auto" type vehicles are counted
+- **Cluster Count**: k = number of Swachh Auto vehicles in ward
 - **Algorithm**: KMeans spatial clustering for geographic distribution
-- **Purpose**: Create consistent, fixed cluster boundaries that never change
-- **Example**: 7 total vehicles → 7 fixed spatial clusters
+- **Example**: 5 Swachh Auto vehicles → 5 fixed spatial clusters
 
-**Phase 2: Assign Routes (Based on ACTIVE Vehicles Only)**
-- **Vehicle Filtering**: Only ACTIVE/AVAILABLE/ONLINE vehicles get route assignments
-- **Distribution**: All clusters distributed evenly among active vehicles
-- **Multi-cluster Assignment**: Each active vehicle handles multiple clusters
-- **Example**: 7 clusters ÷ 4 active vehicles = 2, 2, 2, 1 clusters per vehicle
+**Route Assignment (Based on ACTIVE Swachh Auto Only)**
+- **Status Filter**: Only ACTIVE/AVAILABLE/ONLINE/HALTED/IDEL Swachh Auto vehicles
+- **Distribution**: Each active Swachh Auto gets one cluster
+- **Example**: 5 clusters, 3 active Swachh Auto → 3 vehicles get routes, 2 clusters unassigned
 
 **Benefits:**
-- ✅ Consistent geography: Cluster boundaries never change
-- ✅ Fair workload: Active vehicles share all clusters evenly
-- ✅ Scalable: Easy to add/remove active vehicles without re-clustering
-- ✅ Capacity aware: Respects 500 houses/trip limit per cluster
-- ✅ Status aware: Only active vehicles receive route assignments
+- ✅ Swachh Auto focused: Only relevant vehicles for waste collection
+- ✅ Consistent geography: Cluster count based on total Swachh Auto fleet
+- ✅ Status aware: Only active Swachh Auto vehicles receive routes
+- ✅ Scalable: Easy to activate/deactivate vehicles
+- ✅ API integrated: Fetches all data from external API automatically
 
 ### 3. Route Optimization
 - **VRP Solver**: OR-Tools with capacity constraints and time limits
@@ -397,35 +476,36 @@ class Config:
 ## How It Works: Complete Example
 
 ### Scenario
-- **Ward 1** has 7 total vehicles (4 active, 3 inactive)
-- **1400 buildings** need garbage collection
-- **Capacity**: 500 houses per trip maximum
+- **Ward 29** has 5 Swachh Auto vehicles (3 active, 2 inactive)
+- **1000 buildings** need garbage collection
 
 ### Step-by-Step Process
 
-**Step 1: Create Fixed Clusters**
+**Step 1: Filter Swachh Auto Vehicles**
 ```python
-total_vehicles = 7  # All vehicles (active + inactive)
-clusters = create_clusters(buildings=1400, num_clusters=7)
-# Result: 7 spatial clusters (~200 buildings each)
+swachh_auto = filter_by_type('SWACHH AUTO')
+# Result: 5 Swachh Auto vehicles
 ```
 
-**Step 2: Filter Active Vehicles**
+**Step 2: Create Fixed Clusters**
 ```python
-active_vehicles = filter_by_status(['ACTIVE', 'AVAILABLE', 'ONLINE'])
-# Result: 4 active vehicles (SWM001, SWM002, SWM003, SWM004)
+clusters = create_clusters(buildings=1000, num_clusters=5)
+# Result: 5 spatial clusters (~200 buildings each)
 ```
 
-**Step 3: Distribute Clusters to Active Vehicles**
+**Step 3: Filter Active Swachh Auto**
 ```python
-clusters_per_vehicle = 7 // 4  # = 1 cluster per vehicle
-remaining_clusters = 7 % 4     # = 3 extra clusters
+active_swachh_auto = filter_by_status(['ACTIVE', 'AVAILABLE', 'ONLINE'])
+# Result: 3 active Swachh Auto vehicles
+```
 
-# Distribution:
-# Vehicle SWM001: clusters 0, 1 (2 clusters, 400 buildings, 2 trips)
-# Vehicle SWM002: clusters 2, 3 (2 clusters, 400 buildings, 2 trips)
-# Vehicle SWM003: clusters 4, 5 (2 clusters, 400 buildings, 2 trips)
-# Vehicle SWM004: cluster 6 (1 cluster, 200 buildings, 1 trip)
+**Step 4: Assign Clusters to Active Vehicles**
+```python
+# Each active vehicle gets one cluster
+# Vehicle SA001: cluster 0 (200 buildings)
+# Vehicle SA002: cluster 1 (200 buildings)
+# Vehicle SA003: cluster 2 (200 buildings)
+# Clusters 3, 4 remain unassigned (inactive vehicles)
 ```
 
 **Step 4: Generate Routes**
@@ -441,25 +521,23 @@ for vehicle in active_vehicles:
 
 ### Final Output
 
-**Clusters Created**: 7 fixed spatial clusters
-**Active Vehicles**: 4 vehicles with route assignments
-**Total Trips**: 7 trips covering all 1400 buildings
+**Clusters Created**: 5 fixed spatial clusters (based on Swachh Auto count)
+**Active Vehicles**: 3 Swachh Auto vehicles with route assignments
+**Total Buildings Covered**: 600 buildings (3 clusters × 200)
 
-| Vehicle | Status | Clusters | Buildings | Trips |
-|---------|--------|----------|-----------|-------|
-| SWM001  | ACTIVE | 0, 1     | 400       | 2     |
-| SWM002  | ACTIVE | 2, 3     | 400       | 2     |
-| SWM003  | ACTIVE | 4, 5     | 400       | 2     |
-| SWM004  | ACTIVE | 6        | 200       | 1     |
-| SWM005  | INACTIVE | -      | -         | 0     |
-| SWM006  | INACTIVE | -      | -         | 0     |
-| SWM007  | INACTIVE | -      | -         | 0     |
+| Vehicle | Type | Status | Cluster | Buildings | Route |
+|---------|------|--------|---------|-----------|-------|
+| SA001   | Swachh Auto | ACTIVE | 0 | 200 | ✅ Assigned |
+| SA002   | Swachh Auto | ACTIVE | 1 | 200 | ✅ Assigned |
+| SA003   | Swachh Auto | ACTIVE | 2 | 200 | ✅ Assigned |
+| SA004   | Swachh Auto | INACTIVE | - | - | ❌ No route |
+| SA005   | Swachh Auto | INACTIVE | - | - | ❌ No route |
 
 **Key Points:**
-- ✅ All 7 clusters are covered by 4 active vehicles
-- ✅ Inactive vehicles (SWM005-007) receive no route assignments
-- ✅ Cluster boundaries remain fixed even if vehicles change status
-- ✅ Workload is distributed fairly among active vehicles
+- ✅ Only Swachh Auto vehicles used for clustering
+- ✅ Only active Swachh Auto vehicles receive routes
+- ✅ Clusters 3-4 remain unassigned (for inactive vehicles)
+- ✅ Data fetched automatically from API
 
 ## Performance
 
@@ -520,16 +598,16 @@ services:
 
 ## Key Features Summary
 
-- 🌐 **Live Vehicle Integration**: Real-time SWM API with JWT authentication
+- 🌐 **Live API Integration**: Fetches buildings, roads, boundary from external API
+- 🚛 **Swachh Auto Focused**: Clusters based on Swachh Auto vehicle count
 - 🗺️ **Interactive Maps**: Folium-based visualization with cluster controls
-- 🚛 **Two-Phase Clustering**: Clusters based on total vehicles, routes assigned to active only
 - 📍 **OSRM Routing**: Real-world driving directions and navigation
 - ⏰ **Automatic Scheduling**: Daily data fetch at 5:30 AM
 - 🔐 **Secure API**: Bearer token authentication for all endpoints
 - 📊 **Ward-based Filtering**: Target specific wards for optimization
 - 🎯 **Geospatial AI**: NetworkX graphs, spatial clustering, and VRP solving
-- ✅ **Status-Aware**: Only active vehicles receive route assignments
-- 🔄 **Scalable**: Easy to activate/deactivate vehicles without re-clustering
+- ✅ **Status-Aware**: Only active Swachh Auto vehicles receive routes
+- 🔄 **Auto-Upload**: Routes uploaded to external API automatically
 
 ## Security
 
@@ -546,59 +624,83 @@ services:
 
 ## Troubleshooting
 
-### No Active Vehicles Error
+### No Swachh Auto Vehicles Error
 
-**Problem**: API returns "No ACTIVE vehicles found in ward X"
+**Problem**: API returns "No Swachh Auto vehicles found in ward X"
 
 **Solution**:
 ```json
 {
   "status": "error",
-  "error_type": "no_active_vehicles",
-  "message": "No ACTIVE vehicles found in ward 1. Cannot generate routes.",
-  "total_vehicles_in_ward": 7,
-  "active_vehicles": 0,
-  "status_distribution": {
-    "INACTIVE": 5,
-    "MAINTENANCE": 2
+  "error_type": "no_swachh_auto",
+  "message": "No Swachh Auto vehicles found in ward 29. Cannot create clusters.",
+  "total_vehicles_in_ward": 10,
+  "swachh_auto_count": 0,
+  "vehicle_types_found": {
+    "Garbage Truck": 5,
+    "Compactor": 5
   },
-  "recommendation": "Please activate vehicles or check vehicle status in the ward to generate routes."
+  "recommendation": "Please ensure Swachh Auto vehicles are available in the ward."
 }
 ```
 
 **Actions**:
-1. Check vehicle status in the SWM system
-2. Activate at least one vehicle in the ward
-3. Valid active statuses: ACTIVE, AVAILABLE, ONLINE, READY, OPERATIONAL, IN_SERVICE
+1. Check if ward has Swachh Auto vehicles
+2. Verify vehicle type naming in API (should contain "SWACHH AUTO")
+3. Add Swachh Auto vehicles to the ward
 
-### Cluster Count vs Route Count Mismatch
+### No Active Swachh Auto Error
+
+**Problem**: Swachh Auto vehicles exist but none are active
+
+**Solution**:
+```json
+{
+  "status": "error",
+  "error_type": "no_active_swachh_auto",
+  "message": "No ACTIVE Swachh Auto vehicles found in ward 29.",
+  "total_swachh_auto": 5,
+  "active_swachh_auto": 0,
+  "status_distribution": {
+    "INACTIVE": 3,
+    "MAINTENANCE": 2
+  },
+  "recommendation": "Please activate Swachh Auto vehicles to generate routes."
+}
+```
+
+**Actions**:
+1. Activate at least one Swachh Auto vehicle
+2. Valid active statuses: ACTIVE, AVAILABLE, ONLINE, HALTED, IDEL
+
+### Cluster Count vs Route Count
 
 **Expected Behavior**:
-- Clusters created = Total vehicles (active + inactive)
-- Routes assigned = Active vehicles only
-- Each active vehicle may handle multiple clusters
+- Clusters created = Total Swachh Auto vehicles
+- Routes assigned = Active Swachh Auto vehicles only
+- One cluster per active vehicle
 
 **Example**:
 ```
-Total vehicles: 7 (4 active, 3 inactive)
-Clusters created: 7
-Routes assigned: 4 (one per active vehicle)
-Clusters per vehicle: ~2 clusters per active vehicle
+Swachh Auto vehicles: 5 (3 active, 2 inactive)
+Clusters created: 5
+Routes assigned: 3 (one per active vehicle)
+Unassigned clusters: 2 (for inactive vehicles)
 ```
 
-### CSV Upload vs Live API
+### Data Fetching Modes
 
-**CSV Upload Mode**:
-- Uses ONLY vehicles from uploaded CSV
-- No API calls made
-- All vehicles in CSV are used for clustering
-- Filter by status in CSV for active vehicles
-
-**Live API Mode** (no CSV uploaded):
+**API Mode (Recommended)**:
+- Fetches buildings, roads, boundary from API automatically
 - Fetches vehicles from SWM API by ward number
-- Requires valid ward_no parameter
-- Automatically filters by ward
-- Uses two-phase clustering (total for clusters, active for routes)
+- Filters for Swachh Auto vehicles only
+- Requires only `wardNo` parameter
+
+**Manual Upload Mode**:
+- Upload buildings and roads GeoJSON files
+- Ward boundary fetched from API if not uploaded
+- Vehicles always fetched from API
+- Use when API doesn't have buildings/roads data
 
 ### Map Not Displaying
 
@@ -617,6 +719,21 @@ Clusters per vehicle: ~2 clusters per active vehicle
 curl -X POST "http://localhost:8081/api/auth/token/refresh" \
   -H "Authorization: Bearer swm-2024-secure-key"
 ```
+
+### Ward Data Not Found
+
+**Issue**: API returns "Ward boundary not found"
+
+**Solution**: Upload ward data using the upload endpoint:
+```bash
+curl -X POST "http://localhost:8081/api/ward-geojson/upload" \
+  -H "Authorization: Bearer swm-2024-secure-key" \
+  -F "wardNo=Ward 29" \
+  -F "name=buildings" \
+  -F "geojson_file=@buildings.geojson"
+```
+
+Repeat for roads and boundary with appropriate `name` parameter.
 
 ## License
 

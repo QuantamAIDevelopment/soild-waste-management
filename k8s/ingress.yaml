@@ -1,18 +1,24 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: swm-ingress
+  name: swm-agent-ingress
+  namespace: swm-routing-agent
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.azure.com/tls-cert-keyvault-uri: "https://allvy-core-infra-kv.vault.azure.net/certificates/swm-agent-cert"
 spec:
+  ingressClassName: webapprouting.kubernetes.azure.com
+  tls:
+    - hosts:
+        - routing.swm-agent.com
+      secretName: keyvault-swm-agnet-ingress
   rules:
-  - host: swm.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: swm-service
-            port:
-              number: 80
+    - host: routing.swm-agent.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: swm-routing-agent-service
+                port:
+                  number: 80

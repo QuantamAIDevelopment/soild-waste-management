@@ -1,34 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: swm-app
-  labels:
-    app: swm
+  name: swm-routing-agent-deployment
+  namespace: swm-routing-agent
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
-      app: swm
+      app: swm-routing-agent
   template:
     metadata:
       labels:
-        app: swm
+        app: swm-routing-agent
     spec:
       containers:
-      - name: swm
-        image: swm-app:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: swm-secrets
-              key: api-key
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
+        - name: swm-routing-agent
+          image: <YOUR-ACR-IMAGE>:latest   # replace with actual image
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: ENVIRONMENT
+              value: "production"

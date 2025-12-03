@@ -21,8 +21,10 @@ from scipy.spatial.distance import cdist
 import math
 from src.services.vehicle_service import VehicleService
 from src.services.scheduler_service import SchedulerService
+from src.services.ward_geojson_service import WardGeoJSONService
 from src.api.vehicles_api import router as vehicles_router
 from src.api.auth_endpoints import router as auth_router
+from src.api.ward_geojson_endpoints import router as ward_geojson_router
 from src.routing.capacity_optimizer import CapacityRouteOptimizer
 
 from loguru import logger
@@ -72,12 +74,16 @@ app = FastAPI(
 # Initialize services
 vehicle_service = VehicleService()
 scheduler_service = SchedulerService()
+ward_geojson_service = WardGeoJSONService()
 
 # Include vehicle API routes
 app.include_router(vehicles_router)
 
 # Include authentication API routes
 app.include_router(auth_router)
+
+# Include ward GeoJSON API routes
+app.include_router(ward_geojson_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -135,39 +141,97 @@ def convert_numpy_types(obj):
 
 @app.post("/optimize-routes", tags=["optimization"])
 async def optimize_routes(
-    roads_file: UploadFile = File(..., description="Roads GeoJSON file"),
-    buildings_file: UploadFile = File(..., description="Buildings GeoJSON file"), 
-    ward_geojson: UploadFile = File(..., description="Ward boundary GeoJSON file"),
-    wardNo: str = Form(..., description="Ward number to filter vehicles")
+    wardNo: str = Form(..., description="Ward number to fetch data and filter vehicles"),
+    roads_file: UploadFile = File(default=None, description="Roads GeoJSON file (optional - fetched from API if not provided)"),
+    buildings_file: UploadFile = File(default=None, description="Buildings GeoJSON file (optional - fetched from API if not provided)"), 
+    ward_geojson: UploadFile = File(default=None, description="Ward boundary GeoJSON file (optional - fetched from API if not provided)")
 ):
-    """Upload files and create clusters only (no route assignment or map generation)."""
+    """Create clusters using ward data from API or uploaded files."""
     
-    # Validate file types and wardNo
-    if not roads_file.filename or not roads_file.filename.lower().endswith('.geojson'):
-        raise HTTPException(status_code=400, detail="Roads file must be GeoJSON")
-    if not buildings_file.filename or not buildings_file.filename.lower().endswith('.geojson'):
-        raise HTTPException(status_code=400, detail="Buildings file must be GeoJSON")
+    # Validate wardNo
     if not wardNo or not wardNo.strip():
         raise HTTPException(status_code=400, detail="Ward number is required")
+    
+    # Validate uploaded files if provided
+    if roads_file and roads_file.filename and not roads_file.filename.lower().endswith('.geojson'):
+        raise HTTPException(status_code=400, detail="Roads file must be GeoJSON")
+    if buildings_file and buildings_file.filename and not buildings_file.filename.lower().endswith('.geojson'):
+        raise HTTPException(status_code=400, detail="Buildings file must be GeoJSON")
+    if ward_geojson and ward_geojson.filename and not ward_geojson.filename.lower().endswith('.geojson'):
+        raise HTTPException(status_code=400, detail="Ward boundary file must be GeoJSON")
     
     # Create temporary directory for processing
     with tempfile.TemporaryDirectory() as temp_dir:
         try:
-            # Save uploaded files
             roads_path = os.path.join(temp_dir, "roads.geojson")
             buildings_path = os.path.join(temp_dir, "buildings.geojson")
             ward_path = os.path.join(temp_dir, "ward.geojson")
             
-            with open(roads_path, "wb") as f:
-                shutil.copyfileobj(roads_file.file, f)
-            with open(buildings_path, "wb") as f:
-                shutil.copyfileobj(buildings_file.file, f)
-            with open(ward_path, "wb") as f:
-                shutil.copyfileobj(ward_geojson.file, f)
+            # Check if all files are uploaded or need to fetch from API
+            # Prioritize uploaded files over API
+            use_api = not (roads_file and roads_file.filename and buildings_file and buildings_file.filename)
+            
+            if use_api:
+                # Fetch all data from API
+                logger.info(f"Fetching ward data from API for {wardNo}")
+                ward_data = ward_geojson_service.get_ward_data(wardNo.strip())
+                if not ward_data:
+                    # Try with "Ward " prefix
+                    ward_with_prefix = f"Ward {wardNo.strip()}"
+                    logger.info(f"Retrying with ward name: {ward_with_prefix}")
+                    ward_data = ward_geojson_service.get_ward_data(ward_with_prefix)
+                
+                # API only has ward boundary, not buildings/roads - require file upload
+                if not ward_data:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Ward {wardNo} API only contains boundary data. Please upload buildings_file and roads_file as GeoJSON."
+                    )
+                
+                # This code path won't be reached since API doesn't have complete data
+                # Kept for future when API supports buildings/roads
+                with open(ward_path, "w") as f:
+                    json.dump(ward_data['ward_boundary'], f)
+                with open(buildings_path, "w") as f:
+                    json.dump(ward_data['buildings'], f)
+                with open(roads_path, "w") as f:
+                    json.dump(ward_data['roads'], f)
+                logger.success(f"Successfully fetched all ward data from API for {wardNo}")
+            else:
+                # Use uploaded files
+                logger.info(f"Using uploaded files for {wardNo}")
+                
+                with open(roads_path, "wb") as f:
+                    shutil.copyfileobj(roads_file.file, f)
+                with open(buildings_path, "wb") as f:
+                    shutil.copyfileobj(buildings_file.file, f)
+                
+                # Ward boundary - upload or API
+                if ward_geojson and ward_geojson.filename:
+                    with open(ward_path, "wb") as f:
+                        shutil.copyfileobj(ward_geojson.file, f)
+                else:
+                    ward_data = ward_geojson_service.get_ward_geojson(wardNo.strip())
+                    if not ward_data:
+                        raise HTTPException(status_code=404, detail=f"Ward boundary not found for {wardNo}")
+                    with open(ward_path, "w") as f:
+                        json.dump(ward_data, f)
             
             # Load geospatial data
             buildings_gdf = gpd.read_file(buildings_path)
             roads_gdf = gpd.read_file(roads_path)
+            
+            # Validate data
+            if len(buildings_gdf) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No buildings found in ward {wardNo}. Please upload a valid buildings GeoJSON file."
+                )
+            if len(roads_gdf) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No roads found in ward {wardNo}. Please upload a valid roads GeoJSON file."
+                )
             
             # Convert to WGS84 if needed
             if buildings_gdf.crs != 'EPSG:4326':
@@ -244,6 +308,13 @@ async def optimize_routes(
                 swachh_auto_count = len(swachh_auto_vehicles)
                 clustered_buildings = clusterer.cluster_buildings_with_vehicles(buildings_gdf, swachh_auto_vehicles)
                 
+                # Check if clustering was successful
+                if clustered_buildings is None or len(clustered_buildings) == 0 or 'cluster' not in clustered_buildings.columns:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"No buildings found in ward {wardNo}. The GeoJSON data may be empty or invalid."
+                    )
+                
                 # Extract cluster groups
                 cluster_groups = clustered_buildings.groupby('cluster')
                 clusters_list = [(cluster_id, group) for cluster_id, group in cluster_groups]
@@ -264,7 +335,9 @@ async def optimize_routes(
                 raise HTTPException(status_code=400, detail=str(ve))
             except Exception as vehicle_error:
                 print(f"Failed to get vehicle data: {vehicle_error}")
-                raise HTTPException(status_code=500, detail="Failed to get vehicle data")
+                import traceback
+                print(traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Failed to process data: {str(vehicle_error)}")
             
             # Save data files for later use
             os.makedirs("output", exist_ok=True)
@@ -274,7 +347,6 @@ async def optimize_routes(
             shutil.copy(vehicles_path, "output/vehicles.csv")
             
             # Save clustering results
-            import json
             with open("output/optimization_result.json", "w") as f:
                 json.dump(convert_numpy_types({
                     "wardNo": wardNo,
@@ -1558,6 +1630,37 @@ async def assign_routes_by_vehicle(vehicle_ids: str = Form(..., description="Com
         import traceback
         logger.error(f"Error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/test-ward-api/{ward_no}", tags=["optimization"])
+async def test_ward_api(ward_no: str):
+    """Test ward API endpoint to see what data is returned."""
+    try:
+        base_url = os.getenv('SWM_API_BASE_URL')
+        token = os.getenv('SWM_TOKEN', '').strip("'")
+        
+        url = f"{base_url}/api/ward-geojson/{ward_no}"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        logger.info(f"Testing API: {url}")
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        return JSONResponse({
+            "status_code": response.status_code,
+            "url": url,
+            "response_type": str(type(response.text)),
+            "response_length": len(response.text),
+            "response_preview": response.text[:500] if response.text else "Empty",
+            "headers": dict(response.headers)
+        })
+    except Exception as e:
+        import traceback as tb
+        return JSONResponse({
+            "error": str(e),
+            "traceback": tb.format_exc()
+        })
 
 @app.delete("/cleanup", tags=["optimization"])
 async def cleanup_data():
