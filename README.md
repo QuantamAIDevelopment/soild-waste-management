@@ -1,740 +1,316 @@
-# Intelligent Garbage Collection Route Assignment System
+# 🗺️ Geospatial AI Route Optimizer for Solid Waste Management
 
-A production-ready Python system for optimizing garbage collection routes using geospatial AI, two-phase clustering algorithms, and VRP solving with live vehicle data integration.
+AI-powered garbage collection route optimization using real-time vehicle data, geospatial clustering, and road network analysis.
 
-## 🎯 Core Innovation: Two-Phase Clustering
+## 🚀 Key Features
 
-The system implements a unique **two-phase clustering strategy** that separates cluster creation from route assignment:
+- **Live API Integration**: Real-time vehicle data from SWM API
+- **Swachh Auto Focused**: Clusters based on Swachh Auto vehicle count
+- **Ward-Based Filtering**: Target specific wards for optimization
+- **Geographic Clustering**: KMeans spatial clustering
+- **Interactive Maps**: Folium visualization with layer controls
+- **Automatic Scheduling**: Daily data fetch at 5:30 AM
+- **Auto-Upload**: Routes uploaded to external API automatically
+- **Secure API**: Bearer token authentication
 
-1. **Phase 1 - Fixed Clusters**: Creates clusters based on **TOTAL vehicles** (active + inactive)
-   - Example: 7 total vehicles → 7 fixed spatial clusters
-   - Cluster boundaries remain consistent and never change
-
-2. **Phase 2 - Dynamic Routes**: Assigns routes only to **ACTIVE vehicles**
-   - Example: 4 active vehicles handle all 7 clusters
-   - Distribution: 2, 2, 2, 1 clusters per active vehicle
-   - Each active vehicle handles multiple clusters through multiple trips
-
-**Benefits**: Consistent geography, fair workload distribution, easy scaling when vehicles become active/inactive.
-
-## Features
-
-- **Two-Phase Clustering**: Clusters based on total vehicles, routes assigned to active vehicles only
-- **Live Vehicle Integration**: Real-time vehicle data from SWM API with automatic authentication
-- **Ward-based Filtering**: Filter vehicles by ward number for targeted route optimization
-- **Status-Aware Routing**: Only ACTIVE/AVAILABLE/ONLINE vehicles receive route assignments
-- **Multi-Cluster Assignment**: Active vehicles handle multiple clusters through multiple trips
-- **Interactive Route Maps**: Folium-based maps with cluster controls and trip visualization
-- **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
-- **Automatic Scheduling**: Daily vehicle data fetch at 5:30 AM with APScheduler
-- **RESTful API**: FastAPI with OpenAPI/Swagger documentation
-- **Geospatial Processing**: NetworkX graphs, GeoPandas, and KMeans spatial clustering
-
-## Architecture
-
-```
-├── src/
-│   ├── api/               # FastAPI endpoints and route handlers
-│   │   ├── geospatial_routes.py  # Main optimization API
-│   │   ├── vehicles_api.py       # Vehicle management endpoints
-│   │   └── auth_endpoints.py     # Authentication endpoints
-│   ├── clustering/        # Building clustering and trip assignment
-│   │   ├── assign_buildings.py   # KMeans/DBSCAN clustering
-│   │   └── trip_assignment.py    # Capacity-based trip planning
-│   ├── configurations/    # System configuration
-│   │   └── config.py             # Environment and app settings
-│   ├── data_processing/   # Geospatial data processing
-│   │   ├── load_road_network.py  # Road network graph building
-│   │   └── snap_buildings.py     # Building-to-road snapping
-│   ├── routing/           # Route computation and optimization
-│   │   ├── capacity_optimizer.py # Capacity-based optimization
-│   │   ├── compute_routes.py     # OR-Tools VRP solver
-│   │   └── get_osrm_directions.py # OSRM turn-by-turn directions
-│   ├── services/          # External service integration
-│   │   ├── vehicle_service.py    # Live vehicle API integration
-│   │   ├── auth_service.py       # JWT token management
-│   │   └── scheduler_service.py  # Daily scheduling service
-│   ├── tools/             # Utility tools and algorithms
-│   │   ├── road_snapper.py       # Road network snapping
-│   │   ├── vrp_solver.py         # VRP optimization
-│   │   └── osrm_routing.py       # OSRM routing utilities
-│   └── visualization/     # Map generation and export
-│       ├── folium_map.py         # Interactive map generation
-│       └── export_to_geojson.py  # GeoJSON export utilities
-├── tests/                 # Unit and integration tests
-├── output/                # Generated maps and results (auto-created)
-└── main.py               # CLI and API entry point
-```
-
-## Quick Start
-
-### Prerequisites
+## 📋 Prerequisites
 
 - Python 3.11+
-- Git
-- Internet connection for OSRM routing and live vehicle data
+- GDAL (for geospatial operations)
 
-### Installation
+## 🔧 Installation
 
-1. Clone and setup:
 ```bash
-git clone <repository>
-cd Solid_waste_management
+# Clone repository
+git clone <repository-url>
+cd swm2
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your credentials
 ```
 
-2. Configure environment variables:
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit .env with your credentials
-# SWM API Configuration
+### Environment Variables (.env)
+```env
 SWM_API_BASE_URL=https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.azurewebsites.net
 SWM_USERNAME=your_username
 SWM_PASSWORD=your_password
-SWM_TOKEN=<auto-generated>
-
-# External upload URL for route data
-EXTERNAL_UPLOAD_URL=https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.azurewebsites.net/api/vehicle-routes/upload-data
-
-# API Security
+SWM_TOKEN='your_jwt_token'
+PORT=8001
 API_KEY=swm-2024-secure-key
-DEBUG=true
-PORT=8081
+EXTERNAL_UPLOAD_URL=http://192.168.100.154:8081/api/vehicle-routes/upload-data
 ```
 
-**Important**: Never commit `.env` file to Git. It's already in `.gitignore`.
+## 🏃 Quick Start
 
-3. Run the API server:
+### Start API Server
 ```bash
-python main.py --api --port 8081
+python main.py --api
+# Server starts on http://127.0.0.1:8001
 ```
 
-**Automatic Features**:
-- Vehicle data fetched daily at 5:30 AM
-- JWT token auto-refresh
-- Interactive maps with cluster controls
-
-Or run CLI mode:
+### CLI Mode
 ```bash
-python main.py --roads roads.geojson --buildings buildings.geojson --output results/
+python main.py --roads roads.geojson --buildings buildings.geojson --output output/
 ```
 
-The API will be available at `http://localhost:8081` with Swagger UI at `http://localhost:8081/docs`.
+## 📡 API Endpoints
 
-## API Usage
+All endpoints require: `Authorization: Bearer swm-2024-secure-key`
+
+### Core Endpoints
+
+**1. Optimize Routes**
+```bash
+POST /optimize-routes
+Form Data:
+- wardNo: string (required)
+- roads_file: file (optional)
+- buildings_file: file (optional)
+- ward_geojson: file (optional)
+```
+
+**2. Assign Routes to Vehicles**
+```bash
+POST /assign-routes-by-vehicle
+Form Data:
+- vehicle_ids: string (comma-separated)
+```
+
+**3. Get Cluster Routes**
+```bash
+GET /cluster-routes
+# Returns routes with auto-upload to external API
+```
+
+**4. Get Specific Cluster**
+```bash
+GET /cluster/{cluster_id}
+```
+
+**5. Generate Map**
+```bash
+GET /generate-map
+```
+
+### Vehicle Management
+
+```bash
+GET /api/vehicles/live?wardNo=29
+GET /api/vehicles/{vehicle_id}
+PUT /api/vehicles/{vehicle_id}/status
+```
 
 ### Authentication
-All endpoints require Bearer token authentication:
+
 ```bash
-# Add to all requests
--H "Authorization: Bearer swm-2024-secure-key"
+GET /api/auth/token/info
+POST /api/auth/token/refresh
 ```
 
-### 1. Optimize Routes (Fetch from API or Upload Files)
+### Ward GeoJSON
 
-**Option A: Fetch All Data from API (Recommended)**
 ```bash
-curl -X POST "http://localhost:8081/optimize-routes" \
-  -H "Authorization: Bearer swm-2024-secure-key" \
-  -F "wardNo=Ward 29"
+POST /api/ward-geojson/upload
+GET /api/ward-geojson/{ward_no}
 ```
 
-**Option B: Upload Files Manually**
+## 🔄 Complete Workflow
+
 ```bash
-curl -X POST "http://localhost:8081/optimize-routes" \
+# Step 1: Upload ward data and create clusters
+curl -X POST "http://localhost:8001/optimize-routes" \
   -H "Authorization: Bearer swm-2024-secure-key" \
   -F "wardNo=Ward 29" \
-  -F "roads_file=@roads.geojson" \
   -F "buildings_file=@buildings.geojson" \
-  -F "ward_geojson=@ward.geojson"
-```
+  -F "roads_file=@roads.geojson"
 
-**Note**: 
-- Vehicle data is always fetched from live API
-- Ward boundary is fetched from API if not uploaded
-- Buildings and roads must be uploaded if not available in API
-
-**Response Example:**
-```json
-{
-  "status": "success",
-  "message": "Created 7 clusters from 7 total vehicles. Routes assigned to 4 active vehicles.",
-  "total_vehicles_in_ward": 7,
-  "active_vehicles": 4,
-  "clusters_created": 7,
-  "total_houses": 1400,
-  "clustering_strategy": "Clusters based on 7 total vehicles, routes assigned to 4 active vehicles",
-  "route_summary": [
-    {"vehicle_id": "SWM001", "clusters_assigned": 2, "trips": 2},
-    {"vehicle_id": "SWM002", "clusters_assigned": 2, "trips": 2},
-    {"vehicle_id": "SWM003", "clusters_assigned": 2, "trips": 2},
-    {"vehicle_id": "SWM004", "clusters_assigned": 1, "trips": 1}
-  ]
-}
-```
-
-### 2. Get Cluster Roads with Coordinates
-```bash
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/cluster/0"
-```
-
-**Response:**
-```json
-{
-  "cluster_id": 0,
-  "vehicle_info": {
-    "vehicle_id": "SWM001",
-    "vehicle_type": "garbage_truck",
-    "status": "active",
-    "capacity": 500
-  },
-  "buildings_count": 15,
-  "roads": [
-    {
-      "start_coordinate": {"longitude": 77.123, "latitude": 12.456},
-      "end_coordinate": {"longitude": 77.124, "latitude": 12.457},
-      "distance_meters": 125.5
-    }
-  ],
-  "total_road_segments": 8,
-  "cluster_bounds": {
-    "min_longitude": 77.120,
-    "max_longitude": 77.130,
-    "min_latitude": 12.450,
-    "max_latitude": 12.460
-  }
-}
-```
-
-### 3. Get All Cluster Roads
-```bash
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/clusters"
-```
-
-### 4. Get Route Coordinates with Timestamps
-```bash
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/cluster-routes"
-```
-
-**Response includes:**
-- Ward number
-- Total houses count
-- Route segments with coordinates
-- House count per segment
-- Auto-upload to external API
-
-### 5. Ward GeoJSON Management
-```bash
-# Upload ward boundary
-curl -X POST "http://localhost:8081/api/ward-geojson/upload" \
+# Step 2: Assign routes to specific vehicles
+curl -X POST "http://localhost:8001/assign-routes-by-vehicle" \
   -H "Authorization: Bearer swm-2024-secure-key" \
-  -F "wardNo=Ward 29" \
-  -F "name=Wardboundary" \
-  -F "geojson_file=@ward29.geojson"
+  -F "vehicle_ids=SA001,SA002,SA003"
 
-# Get ward boundary
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/ward-geojson/Ward 29"
-
-# List all wards
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/ward-geojson/list"
+# Step 3: Get routes and auto-upload
+curl -X GET "http://localhost:8001/cluster-routes" \
+  -H "Authorization: Bearer swm-2024-secure-key"
 ```
 
-### 6. Live Vehicle Data
-```bash
-# All vehicles
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/vehicles/live"
+## 🎯 How It Works
 
-# Vehicles by ward
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/vehicles/ward/1"
-```
+### Clustering Logic
 
-### 7. Scheduler Management
-```bash
-# Check scheduler status
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/scheduler/status"
+1. **Filter Swachh Auto**: Only Swachh Auto vehicles used for clustering
+2. **Create Clusters**: Number of clusters = Total Swachh Auto count (all statuses)
+3. **Filter Active**: Only ACTIVE/AVAILABLE/ONLINE vehicles get routes
+4. **Assign Routes**: Each active vehicle gets one cluster
 
-# Manually trigger vehicle fetch
-curl -X POST -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/scheduler/trigger"
-```
+### Example
 
-### 8. Interactive Maps
-- Route Map: `http://localhost:8081/generate-map`
-- API Documentation: `http://localhost:8081/docs`
+**Ward 29:** 5 Swachh Auto (3 active, 2 inactive), 1000 buildings
 
-## Automatic Scheduling
+**Result:**
+- 5 clusters created (based on total Swachh Auto)
+- 3 routes assigned (to active vehicles only)
+- 2 clusters unassigned (for inactive vehicles)
 
-### Daily Vehicle Data Fetch
-The system automatically fetches vehicle data at **5:30 AM daily** using APScheduler:
+| Vehicle | Status | Cluster | Buildings | Route |
+|---------|--------|---------|-----------|-------|
+| SA001 | ACTIVE | 0 | 200 | ✅ |
+| SA002 | ACTIVE | 1 | 200 | ✅ |
+| SA003 | ACTIVE | 2 | 200 | ✅ |
+| SA004 | INACTIVE | - | - | ❌ |
+| SA005 | INACTIVE | - | - | ❌ |
 
-- **Automatic Start**: Scheduler starts with FastAPI server
-- **JWT Token Management**: Automatic token refresh before data fetch
-- **Data Storage**: Saves to `output/vehicles_daily_YYYYMMDD_HHMMSS.csv`
-- **Logging**: Timestamped logs for every scheduled run
-- **Error Handling**: Fallback to cached data if API fails
-
-### Scheduler Endpoints
-| Endpoint | Method | Description |
-|----------|--------|--------------|
-| `/scheduler/status` | GET | Check scheduler status and next run time |
-| `/scheduler/trigger` | POST | Manually trigger vehicle data fetch |
-| `/scheduler/start` | POST | Start scheduler if stopped |
-| `/scheduler/stop` | POST | Stop scheduler |
-
-### Authentication Management
-```bash
-# Check token status
-curl -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/auth/token/info"
-
-# Force token refresh
-curl -X POST -H "Authorization: Bearer swm-2024-secure-key" \
-  "http://localhost:8081/api/auth/token/refresh"
-```
-
-### Testing Scheduler
-```bash
-# Run test script
-python test_scheduler.py
-
-# Check output files
-dir output\vehicles_daily_*.csv
-```
-
-## API Response Structure
-
-### Ward Data from API
-The API returns ward data in this format:
-```json
-{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "id": 1,
-      "name": "buildings",
-      "wardNo": "Ward 29",
-      "geojson": "{...buildings GeoJSON...}"
-    },
-    {
-      "id": 2,
-      "name": "roads",
-      "wardNo": "Ward 29",
-      "geojson": "{...roads GeoJSON...}"
-    },
-    {
-      "id": 3,
-      "name": "Wardboundary",
-      "wardNo": "Ward 29",
-      "geojson": "{...boundary GeoJSON...}"
-    }
-  ]
-}
-```
-
-**The system automatically:**
-- Parses the `features` array
-- Extracts each component by `name` field
-- Converts JSON strings to GeoJSON objects
-- Uses them for clustering
-
-## Input File Formats
-
-### Ward Boundaries (GeoJSON)
-```json
-{
-  "type": "FeatureCollection",
-  "features": [{
-    "type": "Feature",
-    "properties": {"ward_id": 1, "ward_name": "Ward 1"},
-    "geometry": {"type": "Polygon", "coordinates": [...]}
-  }]
-}
-```
-
-### Road Network (GeoJSON)
-```json
-{
-  "type": "FeatureCollection", 
-  "features": [{
-    "type": "Feature",
-    "properties": {"road_id": "R001", "road_name": "Main St"},
-    "geometry": {"type": "LineString", "coordinates": [...]}
-  }]
-}
-```
-
-### Buildings/Houses (GeoJSON)
-```json
-{
-  "type": "FeatureCollection",
-  "features": [{
-    "type": "Feature", 
-    "properties": {"house_id": "H001", "ward_no": 1},
-    "geometry": {"type": "Point", "coordinates": [...]}
-  }]
-}
-```
-
-### Vehicles (CSV - Optional)
-```csv
-vehicle_id,vehicle_type,ward_no,status,capacity,driverName
-SWM001,garbage_truck,1,active,500,Driver1
-SWM002,garbage_truck,1,active,500,Driver2
-```
-
-**Note**: Vehicle data is automatically fetched from live SWM API. CSV upload is optional for testing.
-
-## Algorithm Details
-
-### 1. Data Processing Pipeline
-- **CRS Conversion**: EPSG:4326 (WGS84) for display, EPSG:3857 (Web Mercator) for calculations
-- **Building Snapping**: Snap buildings to nearest road network nodes
-- **Graph Construction**: NetworkX graph from road network for routing
-- **Live Data Integration**: Real-time vehicle data with authentication
-
-### 2. Clustering Strategy (Swachh Auto Based)
-
-**Cluster Creation (Based on Swachh Auto Count)**
-- **Vehicle Filter**: Only "Swachh Auto" type vehicles are counted
-- **Cluster Count**: k = number of Swachh Auto vehicles in ward
-- **Algorithm**: KMeans spatial clustering for geographic distribution
-- **Example**: 5 Swachh Auto vehicles → 5 fixed spatial clusters
-
-**Route Assignment (Based on ACTIVE Swachh Auto Only)**
-- **Status Filter**: Only ACTIVE/AVAILABLE/ONLINE/HALTED/IDEL Swachh Auto vehicles
-- **Distribution**: Each active Swachh Auto gets one cluster
-- **Example**: 5 clusters, 3 active Swachh Auto → 3 vehicles get routes, 2 clusters unassigned
-
-**Benefits:**
-- ✅ Swachh Auto focused: Only relevant vehicles for waste collection
-- ✅ Consistent geography: Cluster count based on total Swachh Auto fleet
-- ✅ Status aware: Only active Swachh Auto vehicles receive routes
-- ✅ Scalable: Easy to activate/deactivate vehicles
-- ✅ API integrated: Fetches all data from external API automatically
-
-### 3. Route Optimization
-- **VRP Solver**: OR-Tools with capacity constraints and time limits
-- **Distance Matrix**: NetworkX shortest paths on road network
-- **Multi-trip Support**: Each cluster becomes a trip (or multiple if >500 houses)
-- **Trip Naming**: `vehicle_1_cluster_0_trip_1` format for tracking
-- **OSRM Integration**: Real-world driving directions and turn-by-turn navigation
-
-### 4. Interactive Visualization
-- **Folium Maps**: Color-coded routes with cluster controls
-- **Layer Management**: Show/hide individual trips and clusters
-- **Route Details**: Start/end markers, directional arrows, trip statistics
-- **Dashboard Panel**: Trip summary with toggle controls
-- **Vehicle Status**: Visual indicators for active vs inactive vehicles
-
-## Testing
-
-Run unit tests:
-```bash
-pytest tests/ -v
-```
-
-Run integration test:
-```bash
-pytest tests/test_snapper_vrp.py::TestIntegration::test_end_to_end_small_dataset -v
-```
-
-## Configuration
+## 📊 Configuration
 
 Edit `src/configurations/config.py`:
 
 ```python
 class Config:
-    # Spatial reference systems
-    TARGET_CRS = "EPSG:3857"  # Web Mercator for calculations
-    
-    # Vehicle capacity settings
+    TARGET_CRS = "EPSG:3857"
     HOUSES_PER_VEHICLE_PER_TRIP = 500
     MAX_TRIPS_PER_DAY = 3
-    
-    # VRP solver settings
     VRP_TIME_LIMIT_SECONDS = 30
-    VRP_VEHICLE_CAPACITY = 999999  # Effectively infinite
-    
-    # API settings
     API_HOST = "127.0.0.1"
     API_PORT = 8080
-    
-    # Deterministic results
     RANDOM_SEED = 42
 ```
 
-## How It Works: Complete Example
+## 🧪 Testing
 
-### Scenario
-- **Ward 29** has 5 Swachh Auto vehicles (3 active, 2 inactive)
-- **1000 buildings** need garbage collection
+```bash
+# Run all tests
+pytest tests/ -v
 
-### Step-by-Step Process
-
-**Step 1: Filter Swachh Auto Vehicles**
-```python
-swachh_auto = filter_by_type('SWACHH AUTO')
-# Result: 5 Swachh Auto vehicles
+# Run specific test
+pytest tests/test_snapper_vrp.py::TestIntegration::test_end_to_end_small_dataset -v
 ```
 
-**Step 2: Create Fixed Clusters**
-```python
-clusters = create_clusters(buildings=1000, num_clusters=5)
-# Result: 5 spatial clusters (~200 buildings each)
+## 📦 Project Structure
+
+```
+swm2/
+├── src/
+│   ├── api/                 # FastAPI endpoints
+│   ├── clustering/          # Clustering algorithms
+│   ├── configurations/      # Config settings
+│   ├── data_processing/     # Data loading
+│   ├── routing/             # Route optimization
+│   ├── services/            # Business logic
+│   ├── tools/               # Utility tools
+│   └── visualization/       # Map generation
+├── tests/                   # Tests
+├── manifests/               # Kubernetes manifests
+│   ├── deployment.yml
+│   ├── service.yml
+│   └── secrets.yaml
+├── main.py                  # Entry point
+├── requirements.txt
+├── Dockerfile
+└── README.md
 ```
 
-**Step 3: Filter Active Swachh Auto**
-```python
-active_swachh_auto = filter_by_status(['ACTIVE', 'AVAILABLE', 'ONLINE'])
-# Result: 3 active Swachh Auto vehicles
+## 🐳 Docker Deployment
+
+### Build and Run
+```bash
+docker build -t swm-optimizer .
+docker run -p 8001:8001 --env-file .env swm-optimizer
 ```
 
-**Step 4: Assign Clusters to Active Vehicles**
-```python
-# Each active vehicle gets one cluster
-# Vehicle SA001: cluster 0 (200 buildings)
-# Vehicle SA002: cluster 1 (200 buildings)
-# Vehicle SA003: cluster 2 (200 buildings)
-# Clusters 3, 4 remain unassigned (inactive vehicles)
+### Kubernetes Deployment
+```bash
+# Apply secrets
+kubectl apply -f manifests/secrets.yaml
+
+# Deploy application
+kubectl apply -f manifests/deployment.yml
+kubectl apply -f manifests/service.yml
 ```
 
-**Step 4: Generate Routes**
-```python
-for vehicle in active_vehicles:
-    for cluster in vehicle.assigned_clusters:
-        trip = create_trip(
-            trip_id=f"{vehicle.id}_cluster_{cluster.id}_trip_1",
-            houses=cluster.buildings,
-            route=optimize_route(cluster.buildings, road_network)
-        )
+## ⚠️ Troubleshooting
+
+### No Swachh Auto Vehicles
+**Error:** "No Swachh Auto vehicles found in ward X"
+
+**Solution:** Verify ward has Swachh Auto vehicles with correct naming
+
+### No Active Swachh Auto
+**Error:** "No ACTIVE Swachh Auto vehicles found"
+
+**Solution:** Activate at least one Swachh Auto vehicle (valid statuses: ACTIVE, AVAILABLE, ONLINE, HALTED, IDEL)
+
+### Port Already in Use
+```bash
+python main.py --api --port 8002
+# Or update PORT in .env
 ```
-
-### Final Output
-
-**Clusters Created**: 5 fixed spatial clusters (based on Swachh Auto count)
-**Active Vehicles**: 3 Swachh Auto vehicles with route assignments
-**Total Buildings Covered**: 600 buildings (3 clusters × 200)
-
-| Vehicle | Type | Status | Cluster | Buildings | Route |
-|---------|------|--------|---------|-----------|-------|
-| SA001   | Swachh Auto | ACTIVE | 0 | 200 | ✅ Assigned |
-| SA002   | Swachh Auto | ACTIVE | 1 | 200 | ✅ Assigned |
-| SA003   | Swachh Auto | ACTIVE | 2 | 200 | ✅ Assigned |
-| SA004   | Swachh Auto | INACTIVE | - | - | ❌ No route |
-| SA005   | Swachh Auto | INACTIVE | - | - | ❌ No route |
-
-**Key Points:**
-- ✅ Only Swachh Auto vehicles used for clustering
-- ✅ Only active Swachh Auto vehicles receive routes
-- ✅ Clusters 3-4 remain unassigned (for inactive vehicles)
-- ✅ Data fetched automatically from API
-
-## Performance
-
-- **Scalability**: Optimized for ward sizes up to several thousand houses
-- **Clustering Efficiency**: KMeans clustering limits VRP problem size
-- **Spatial Indexing**: GeoPandas spatial operations for fast nearest neighbor queries
-- **Caching**: JWT token caching and session reuse for API calls
-- **Deterministic Results**: Configurable random seed for reproducible optimization
-- **Memory Management**: Automatic cleanup of temporary files and maps
-
-## Logging
-
-The system provides comprehensive logging:
-- Clustering assignments and decisions
-- Road segment assignment rationale  
-- OR-Tools objective values
-- Conflict resolution steps
-- Performance metrics
-
-## Docker Support
-
-```dockerfile
-FROM python:3.11-slim
-
-# Install system dependencies for geospatial libraries
-RUN apt-get update && apt-get install -y \
-    gdal-bin \
-    libgdal-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8081
-
-# Run API server by default
-CMD ["python", "main.py", "--api", "--port", "8081"]
-```
-
-### Docker Compose
-```yaml
-version: '3.8'
-services:
-  swm-optimizer:
-    build: .
-    ports:
-      - "8081:8081"
-    environment:
-      - SWM_API_BASE_URL=${SWM_API_BASE_URL}
-      - SWM_USERNAME=${SWM_USERNAME}
-      - SWM_PASSWORD=${SWM_PASSWORD}
-      - API_KEY=${API_KEY}
-    volumes:
-      - ./output:/app/output
-```
-
-## Key Features Summary
-
-- 🌐 **Live API Integration**: Fetches buildings, roads, boundary from external API
-- 🚛 **Swachh Auto Focused**: Clusters based on Swachh Auto vehicle count
-- 🗺️ **Interactive Maps**: Folium-based visualization with cluster controls
-- 📍 **OSRM Routing**: Real-world driving directions and navigation
-- ⏰ **Automatic Scheduling**: Daily data fetch at 5:30 AM
-- 🔐 **Secure API**: Bearer token authentication for all endpoints
-- 📊 **Ward-based Filtering**: Target specific wards for optimization
-- 🎯 **Geospatial AI**: NetworkX graphs, spatial clustering, and VRP solving
-- ✅ **Status-Aware**: Only active Swachh Auto vehicles receive routes
-- 🔄 **Auto-Upload**: Routes uploaded to external API automatically
-
-## Security
-
-### Environment Variables
-- `.env` file contains sensitive credentials and is excluded from Git
-- Use `.env.example` as a template
-- JWT tokens are auto-generated and refreshed
-- Never share or commit API keys and passwords
-
-### API Authentication
-- All endpoints require Bearer token: `Authorization: Bearer swm-2024-secure-key`
-- JWT tokens for SWM API are managed automatically
-- Tokens refresh before expiration
-
-## Troubleshooting
-
-### No Swachh Auto Vehicles Error
-
-**Problem**: API returns "No Swachh Auto vehicles found in ward X"
-
-**Solution**:
-```json
-{
-  "status": "error",
-  "error_type": "no_swachh_auto",
-  "message": "No Swachh Auto vehicles found in ward 29. Cannot create clusters.",
-  "total_vehicles_in_ward": 10,
-  "swachh_auto_count": 0,
-  "vehicle_types_found": {
-    "Garbage Truck": 5,
-    "Compactor": 5
-  },
-  "recommendation": "Please ensure Swachh Auto vehicles are available in the ward."
-}
-```
-
-**Actions**:
-1. Check if ward has Swachh Auto vehicles
-2. Verify vehicle type naming in API (should contain "SWACHH AUTO")
-3. Add Swachh Auto vehicles to the ward
-
-### No Active Swachh Auto Error
-
-**Problem**: Swachh Auto vehicles exist but none are active
-
-**Solution**:
-```json
-{
-  "status": "error",
-  "error_type": "no_active_swachh_auto",
-  "message": "No ACTIVE Swachh Auto vehicles found in ward 29.",
-  "total_swachh_auto": 5,
-  "active_swachh_auto": 0,
-  "status_distribution": {
-    "INACTIVE": 3,
-    "MAINTENANCE": 2
-  },
-  "recommendation": "Please activate Swachh Auto vehicles to generate routes."
-}
-```
-
-**Actions**:
-1. Activate at least one Swachh Auto vehicle
-2. Valid active statuses: ACTIVE, AVAILABLE, ONLINE, HALTED, IDEL
-
-### Cluster Count vs Route Count
-
-**Expected Behavior**:
-- Clusters created = Total Swachh Auto vehicles
-- Routes assigned = Active Swachh Auto vehicles only
-- One cluster per active vehicle
-
-**Example**:
-```
-Swachh Auto vehicles: 5 (3 active, 2 inactive)
-Clusters created: 5
-Routes assigned: 3 (one per active vehicle)
-Unassigned clusters: 2 (for inactive vehicles)
-```
-
-### Data Fetching Modes
-
-**API Mode (Recommended)**:
-- Fetches buildings, roads, boundary from API automatically
-- Fetches vehicles from SWM API by ward number
-- Filters for Swachh Auto vehicles only
-- Requires only `wardNo` parameter
-
-**Manual Upload Mode**:
-- Upload buildings and roads GeoJSON files
-- Ward boundary fetched from API if not uploaded
-- Vehicles always fetched from API
-- Use when API doesn't have buildings/roads data
-
-### Map Not Displaying
-
-**Issue**: `/generate-map` returns 404
-
-**Cause**: Map files are auto-deleted after serving
-
-**Solution**: Run `/optimize-routes` again to regenerate the map
 
 ### Token Expiration
-
-**Issue**: API calls fail with 401 Unauthorized
-
-**Solution**: Token auto-refreshes, but you can manually refresh:
 ```bash
-curl -X POST "http://localhost:8081/api/auth/token/refresh" \
+curl -X POST "http://localhost:8001/api/auth/token/refresh" \
   -H "Authorization: Bearer swm-2024-secure-key"
 ```
 
-### Ward Data Not Found
+## 📈 Performance
 
-**Issue**: API returns "Ward boundary not found"
+- Handles wards with thousands of buildings
+- KMeans for efficient spatial grouping
+- JWT token caching and session reuse
+- Deterministic results with configurable seed
+- Automatic cleanup of temporary files
 
-**Solution**: Upload ward data using the upload endpoint:
+## 🔄 Automatic Scheduling
+
+System automatically fetches vehicle data daily at 5:30 AM.
+
+Check status:
 ```bash
-curl -X POST "http://localhost:8081/api/ward-geojson/upload" \
-  -H "Authorization: Bearer swm-2024-secure-key" \
-  -F "wardNo=Ward 29" \
-  -F "name=buildings" \
-  -F "geojson_file=@buildings.geojson"
+GET /api/scheduler/status
 ```
 
-Repeat for roads and boundary with appropriate `name` parameter.
+Manual trigger:
+```bash
+POST /api/scheduler/trigger
+```
 
-## License
+## 🌐 Interactive Maps
 
-MIT License - see LICENSE file for details.
+Maps include:
+- Ward boundary (blue outline)
+- Color-coded clusters by vehicle
+- Directional route arrows
+- Building polygons
+- Trip dashboard with statistics
+- Layer controls (show/hide clusters)
+- Toggle buttons for individual clusters
+
+## 📝 Logging
+
+Comprehensive logging with Loguru:
+- Clustering decisions
+- Vehicle assignments
+- API calls and responses
+- Route optimization metrics
+- Upload status
+
+## 🔐 Security
+
+- Never commit `.env` file
+- Use `.env.example` as template
+- JWT tokens auto-refresh
+- API keys required for all endpoints
+- Kubernetes secrets for sensitive data
+
+## 📄 License
+
+MIT License
+
+## 📞 Support
+
+- API Documentation: `http://localhost:8001/docs`
+- Check logs for detailed error information
+- Review troubleshooting section above
