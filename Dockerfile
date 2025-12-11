@@ -21,6 +21,5 @@ RUN mkdir -p output
 EXPOSE 8001
 
 ENV PYTHONPATH=/app
-ENV PORT=8081
 
-CMD ["python", "main.py", "--api", "--port", "8081"]
+CMD ["python", "main.py", "--api"]

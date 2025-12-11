@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  swm-optimizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: swm-route-optimizer
+    ports:
+      - "8081:8081"
+    environment:
+      - SWM_API_BASE_URL=${SWM_API_BASE_URL}
+      - SWM_USERNAME=${SWM_USERNAME}
+      - SWM_PASSWORD=${SWM_PASSWORD}
+      - SWM_TOKEN=${SWM_TOKEN}
+      - API_KEY=${API_KEY}
+      - EXTERNAL_UPLOAD_URL=${EXTERNAL_UPLOAD_URL}
+      - PORT=8081
+      - DEBUG=${DEBUG:-true}
+      - PYTHONPATH=/app
+    volumes:
+      - ./output:/app/output
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - swm-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  swm-network:
+    driver: bridge

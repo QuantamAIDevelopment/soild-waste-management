@@ -375,7 +375,7 @@ class Config:
     
     # API settings
     API_HOST = "127.0.0.1"
-    API_PORT = 8080
+    API_PORT = 8081
     
     # Deterministic results
     RANDOM_SEED = 42

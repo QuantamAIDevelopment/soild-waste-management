@@ -171,7 +171,7 @@ def main():
     parser.add_argument("--output", default="output", help="Output directory")
     parser.add_argument("--osrm-url", default="http://router.project-osrm.org", help="OSRM server URL")
     parser.add_argument("--api", action="store_true", help="Start FastAPI server instead")
-    parser.add_argument("--port", type=int, default=8081, help="Port for FastAPI server (default: 8081)")
+    parser.add_argument("--port", type=int, default=int(os.getenv('PORT', 8081)), help="Port for FastAPI server (default: from PORT env or 8081)")
     
     args = parser.parse_args()
     
@@ -194,7 +194,7 @@ def main():
         except OSError as e:
             if "Address already in use" in str(e) or "10048" in str(e):
                 logger.error(f"❌ Port {args.port} is already in use. Try a different port with --port <number>")
-                logger.info("💡 Example: python main.py --api --port 8081")
+                logger.info("💡 Example: python main.py --api --port 8082")
             else:
                 logger.error(f"❌ Server startup failed: {e}")
             sys.exit(1)
@@ -220,7 +220,6 @@ def main():
             
             # Open the map automatically
             import webbrowser
-            import os
             map_path = os.path.abspath(results['route_map'])
             print(f"\n🌐 Opening map in browser: {map_path}")
             webbrowser.open(f"file://{map_path}")
