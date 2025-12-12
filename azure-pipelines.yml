@@ -1,0 +1,55 @@
+trigger:
+- main   # change if needed
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  acrName: "allvysharedacr"
+  acrLoginServer: "$(acrName).azurecr.io"
+  imageName: "swm-route-optimizer"      # change this to your service name
+  buildTag: "$(Build.BuildId)"
+
+steps:
+
+# 1. Checkout code
+- checkout: self
+  clean: true
+
+# 2. Login to Azure & ACR
+- task: AzureCLI@2
+  displayName: "Azure Login + ACR Login"
+  inputs:
+    azureSubscription: "agent-route-final-sc"
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      echo "Logging into Azure..."
+      az acr login --name $(acrName)
+
+# 3. Build & Push Docker Image (BuildId + latest)
+- task: Docker@2
+  displayName: "Build and Push Docker Image to ACR"
+  inputs:
+    repository: "$(acrLoginServer)/$(imageName)"
+    command: buildAndPush
+    Dockerfile: "**/Dockerfile"
+    buildContext: "$(Build.SourcesDirectory)"
+    tags: |
+      $(buildTag)
+      latest
+
+# 4. Copy Kubernetes Manifests into Artifact Directory
+- task: CopyFiles@2
+  displayName: "Copy Kubernetes Manifests"
+  inputs:
+    contents: "manifests/**/*.yaml"              # folder `manifests/`
+    targetFolder: "$(Build.ArtifactStagingDirectory)/manifests"
+
+# 5. Publish Manifests as Build Artifact
+- task: PublishBuildArtifacts@1
+  displayName: "Publish Manifest Artifact"
+  inputs:
+    pathToPublish: "$(Build.ArtifactStagingDirectory)/manifests"
+    artifactName: "manifests"
+    publishLocation: "Container"
