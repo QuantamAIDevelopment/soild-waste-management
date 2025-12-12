@@ -5,7 +5,7 @@ metadata:
   labels:
     app: swm-route-optimizer
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: swm-route-optimizer
