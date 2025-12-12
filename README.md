@@ -39,7 +39,7 @@ SWM_API_BASE_URL=https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.a
 SWM_USERNAME=your_username
 SWM_PASSWORD=your_password
 SWM_TOKEN='your_jwt_token'
-PORT=8001
+PORT=8081
 API_KEY=swm-2024-secure-key
 EXTERNAL_UPLOAD_URL=http://192.168.100.154:8081/api/vehicle-routes/upload-data
 ```
@@ -49,7 +49,7 @@ EXTERNAL_UPLOAD_URL=http://192.168.100.154:8081/api/vehicle-routes/upload-data
 ### Start API Server
 ```bash
 python main.py --api
-# Server starts on http://127.0.0.1:8001
+# Server starts on http://127.0.0.1:8081
 ```
 
 ### CLI Mode
@@ -122,19 +122,19 @@ GET /api/ward-geojson/{ward_no}
 
 ```bash
 # Step 1: Upload ward data and create clusters
-curl -X POST "http://localhost:8001/optimize-routes" \
+curl -X POST "http://localhost:8081/optimize-routes" \
   -H "Authorization: Bearer swm-2024-secure-key" \
   -F "wardNo=Ward 29" \
   -F "buildings_file=@buildings.geojson" \
   -F "roads_file=@roads.geojson"
 
 # Step 2: Assign routes to specific vehicles
-curl -X POST "http://localhost:8001/assign-routes-by-vehicle" \
+curl -X POST "http://localhost:8081/assign-routes-by-vehicle" \
   -H "Authorization: Bearer swm-2024-secure-key" \
   -F "vehicle_ids=SA001,SA002,SA003"
 
 # Step 3: Get routes and auto-upload
-curl -X GET "http://localhost:8001/cluster-routes" \
+curl -X GET "http://localhost:8081/cluster-routes" \
   -H "Authorization: Bearer swm-2024-secure-key"
 ```
 
@@ -175,7 +175,7 @@ class Config:
     MAX_TRIPS_PER_DAY = 3
     VRP_TIME_LIMIT_SECONDS = 30
     API_HOST = "127.0.0.1"
-    API_PORT = 8080
+    API_PORT = 8081
     RANDOM_SEED = 42
 ```
 
@@ -218,7 +218,7 @@ swm2/
 ### Build and Run
 ```bash
 docker build -t swm-optimizer .
-docker run -p 8001:8001 --env-file .env swm-optimizer
+docker run -p 8081:8081 --env-file .env swm-optimizer
 ```
 
 ### Kubernetes Deployment
@@ -251,7 +251,7 @@ python main.py --api --port 8002
 
 ### Token Expiration
 ```bash
-curl -X POST "http://localhost:8001/api/auth/token/refresh" \
+curl -X POST "http://localhost:8081/api/auth/token/refresh" \
   -H "Authorization: Bearer swm-2024-secure-key"
 ```
 
@@ -311,6 +311,6 @@ MIT License
 
 ## 📞 Support
 
-- API Documentation: `http://localhost:8001/docs`
+- API Documentation: `http://localhost:8081/docs`
 - Check logs for detailed error information
 - Review troubleshooting section above

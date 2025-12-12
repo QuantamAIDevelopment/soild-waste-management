@@ -80,11 +80,8 @@ class AuthService:
             return None
     
     def _update_env_token(self, new_token: str) -> bool:
-        """Update token in .env file."""
+        """Update token in memory (container-safe)."""
         try:
-            # Update the .env file
-            set_key(self.env_file, 'SWM_TOKEN', new_token)
-            
             # Update current instance
             self._current_token = new_token
             self._token_expiry = self._get_token_expiry(new_token)
@@ -92,11 +89,20 @@ class AuthService:
             # Update environment variable for current session
             os.environ['SWM_TOKEN'] = new_token
             
-            logger.success("Token updated in .env file")
+            # Try to update .env file (works locally, fails silently in container)
+            try:
+                if os.path.exists(self.env_file) and os.access(self.env_file, os.W_OK):
+                    set_key(self.env_file, 'SWM_TOKEN', new_token)
+                    logger.success("Token updated in .env file")
+                else:
+                    logger.info("Token updated in memory (container mode)")
+            except:
+                logger.info("Token updated in memory (container mode)")
+            
             return True
             
         except Exception as e:
-            logger.error(f"Failed to update .env file: {e}")
+            logger.error(f"Failed to update token: {e}")
             return False
     
     def get_valid_token(self) -> Optional[str]:

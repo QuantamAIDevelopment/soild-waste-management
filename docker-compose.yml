@@ -25,7 +25,7 @@ services:
     networks:
       - swm-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/')"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8081/')"]
       interval: 30s
       timeout: 10s
       retries: 3
