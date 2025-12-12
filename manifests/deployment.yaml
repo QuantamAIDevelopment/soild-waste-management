@@ -36,11 +36,6 @@ spec:
               name: swm-route-optimizer-secrets
               key: SWM_PASSWORD
         # SWM_TOKEN removed - will be generated dynamically at runtime
-        - name: API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: swm-route-optimizer-secrets
-              key: API_KEY
         - name: EXTERNAL_UPLOAD_URL
           valueFrom:
             secretKeyRef:
