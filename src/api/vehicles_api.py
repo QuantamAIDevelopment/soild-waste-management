@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from src.services.vehicle_service import VehicleService
 from typing import List, Dict, Optional
+import numpy as np
 
 router = APIRouter(prefix="/api/vehicles", tags=["vehicles"])
 vehicle_service = VehicleService()
@@ -21,6 +22,7 @@ async def get_live_vehicles():
                 "count": 0
             })
         
+        vehicles_df = vehicles_df.replace([np.inf, -np.inf, np.nan], None)
         vehicles_data = vehicles_df.to_dict('records')
         
         return JSONResponse({
@@ -99,6 +101,9 @@ async def list_vehicles():
         active_vehicles = len(vehicles_df[vehicles_df['status'].str.upper().isin(['ACTIVE', 'AVAILABLE', 'ONLINE'])])
         inactive_vehicles = total_vehicles - active_vehicles
         
+        # Clean data before serialization
+        vehicles_df = vehicles_df.replace([np.inf, -np.inf, np.nan], None)
+        
         # Get vehicle list
         vehicles_list = []
         for _, vehicle in vehicles_df.iterrows():
@@ -106,7 +111,7 @@ async def list_vehicles():
                 "vehicle_id": vehicle.get('vehicle_id', 'Unknown'),
                 "status": vehicle.get('status', 'Unknown'),
                 "vehicle_type": vehicle.get('vehicle_type', 'Unknown'),
-                "capacity": vehicle.get('capacity', 0)
+                "capacity": vehicle.get('capacity', 0) if vehicle.get('capacity') not in [None, np.nan] else 0
             })
         
         return JSONResponse({
