@@ -1,5 +1,5 @@
 trigger:
-- none   # change if needed
+- none   # enable when ready
 
 pool:
   vmImage: ubuntu-latest
@@ -7,16 +7,16 @@ pool:
 variables:
   acrName: "allvysharedacr"
   acrLoginServer: "$(acrName).azurecr.io"
-  imageName: "swm-route-optimizer"      # change this to your service name
+  imageName: "swm-route-optimizer"
   buildTag: "$(Build.BuildId)"
 
 steps:
 
-# 1. Checkout code
+# 1. Checkout
 - checkout: self
   clean: true
 
-# 2. Login to Azure & ACR
+# 2. Azure Login + ACR Login
 - task: AzureCLI@2
   displayName: "Azure Login + ACR Login"
   inputs:
@@ -24,30 +24,33 @@ steps:
     scriptType: bash
     scriptLocation: inlineScript
     inlineScript: |
-      echo "Logging into Azure..."
+      echo "Logging into ACR..."
       az acr login --name $(acrName)
 
-# 3. Build & Push Docker Image (BuildId + latest)
-- task: Docker@2
-  displayName: "Build and Push Docker Image to ACR (AMD64)"
-  inputs:
-    repository: "$(acrLoginServer)/$(imageName)"
-    command: buildAndPush
-    Dockerfile: "**/Dockerfile"
-    buildContext: "$(Build.SourcesDirectory)"
-    arguments: "--platform linux/amd64"
-    tags: |
-      $(buildTag)
-      latest
+# 3. Enable Docker Buildx (MANDATORY)
+- script: |
+    docker buildx create --name multiarch-builder --use
+    docker buildx inspect --bootstrap
+  displayName: "Enable Docker Buildx"
 
-# 4. Copy Kubernetes Manifests into Artifact Directory
+# 4. Build & Push Multi-Arch Image (amd64 + arm64)
+- script: |
+    docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      -t $(acrLoginServer)/$(imageName):$(buildTag) \
+      -t $(acrLoginServer)/$(imageName):latest \
+      --push \
+      .
+  displayName: "Build & Push Multi-Arch Docker Image"
+
+# 5. Copy Kubernetes Manifests
 - task: CopyFiles@2
   displayName: "Copy Kubernetes Manifests"
   inputs:
-    contents: "manifests/**/*.yaml"              # folder `manifests/`
+    contents: "manifests/**/*.yaml"
     targetFolder: "$(Build.ArtifactStagingDirectory)/manifests"
 
-# 5. Publish Manifests as Build Artifact
+# 6. Publish Manifests
 - task: PublishBuildArtifacts@1
   displayName: "Publish Manifest Artifact"
   inputs:
