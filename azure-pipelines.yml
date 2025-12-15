@@ -29,12 +29,13 @@ steps:
 
 # 3. Build & Push Docker Image (BuildId + latest)
 - task: Docker@2
-  displayName: "Build and Push Docker Image to ACR"
+  displayName: "Build and Push Docker Image to ACR (AMD64)"
   inputs:
     repository: "$(acrLoginServer)/$(imageName)"
     command: buildAndPush
     Dockerfile: "**/Dockerfile"
     buildContext: "$(Build.SourcesDirectory)"
+    arguments: "--platform linux/amd64"
     tags: |
       $(buildTag)
       latest
