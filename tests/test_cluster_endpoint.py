@@ -7,7 +7,7 @@ import json
 def test_cluster_endpoint():
     """Test the GET /cluster/{cluster_id} endpoint."""
     
-    base_url = "http://127.0.0.1:8081"
+    base_url = "http://127.0.0.1:8000"
     
     # Test cluster endpoint
     cluster_id = 0
@@ -44,8 +44,8 @@ def test_cluster_endpoint():
             print(f"❌ Error {response.status_code}: {response.text}")
             
     except requests.exceptions.ConnectionError:
-        print("❌ Connection failed. Make sure the server is running on port 8081")
-        print("Start server with: python main.py --api --port 8081")
+        print("❌ Connection failed. Make sure the server is running on port 8000")
+        print("Start server with: python main.py --api --port 8000")
     except Exception as e:
         print(f"❌ Error: {e}")
 

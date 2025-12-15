@@ -32,10 +32,10 @@ COPY . .
 RUN mkdir -p uploads
 
 # Expose port
-EXPOSE 8081
+EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONPATH=/app
 
 # Run the application
-CMD ["python", "main.py"]
+CMD ["python", "main.py", "--api", "--port", "8000"]

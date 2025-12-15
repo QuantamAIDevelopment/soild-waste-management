@@ -171,7 +171,7 @@ def main():
     parser.add_argument("--output", default="output", help="Output directory")
     parser.add_argument("--osrm-url", default="http://router.project-osrm.org", help="OSRM server URL")
     parser.add_argument("--api", action="store_true", help="Start FastAPI server instead")
-    parser.add_argument("--port", type=int, default=int(os.getenv('PORT', 8081)), help="Port for FastAPI server (default: from PORT env or 8081)")
+    parser.add_argument("--port", type=int, default=int(os.getenv('PORT', 8000)), help="Port for FastAPI server (default: from PORT env or 8000)")
     
     args = parser.parse_args()
     
@@ -190,7 +190,7 @@ def main():
         from src.api.geospatial_routes import app
         logger.info(f"🚀 Starting FastAPI server on port {args.port}...")
         try:
-            uvicorn.run(app, host="127.0.0.1", port=args.port)
+            uvicorn.run(app, host="0.0.0.0", port=args.port)
         except OSError as e:
             if "Address already in use" in str(e) or "10048" in str(e):
                 logger.error(f"❌ Port {args.port} is already in use. Try a different port with --port <number>")

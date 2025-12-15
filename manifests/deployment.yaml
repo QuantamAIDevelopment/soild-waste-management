@@ -19,7 +19,7 @@ spec:
           image: allvysharedacr.azurecr.io/swm-route-optimizer:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 8081
+            - containerPort: 8000
           env:
             # SWM API configuration
             - name: SWM_API_BASE_URL

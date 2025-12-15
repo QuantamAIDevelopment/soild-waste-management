@@ -98,7 +98,7 @@ EXTERNAL_UPLOAD_URL=https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-0
 
 # Application Configuration
 DEBUG=true
-PORT=8081
+PORT=8000
 API_KEY=swm-2024-secure-key
 
 # Database (Optional)
@@ -112,10 +112,10 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/waste_db
 ### Running the API Server
 ```bash
 # Development mode
-python main.py --api --port 8081
+python main.py --api --port 8000
 
 # Access Swagger UI
-http://localhost:8081/docs
+http://localhost:8000/docs
 ```
 
 ### Adding New Endpoints
@@ -375,7 +375,7 @@ class Config:
     
     # API settings
     API_HOST = "127.0.0.1"
-    API_PORT = 8081
+    API_PORT = 8000
     
     # Deterministic results
     RANDOM_SEED = 42
@@ -455,7 +455,7 @@ logger.error("Error message")
 3. **Memory Issues**: Process large datasets in chunks, clean up temporary files
 4. **API Timeouts**: Increase timeout for large optimization problems (30s default)
 5. **Token Expiration**: JWT tokens auto-refresh, check auth_service logs if issues persist
-6. **Port Conflicts**: Default port 8081, use `--port` flag to change if occupied
+6. **Port Conflicts**: Default port 8000, use `--port` flag to change if occupied
 7. **Vehicle Data**: If no vehicles found, check ward number and API connectivity
 8. **Map Generation**: Maps auto-delete after serving, use `/generate-map` to regenerate
 9. **No Active Vehicles**: System returns error if no active vehicles in ward - check vehicle status
@@ -501,10 +501,10 @@ active = vehicles_df[vehicles_df['status'].str.upper().isin(ACTIVE_STATUSES)]
 pip install gunicorn
 
 # Run with Gunicorn (from main.py)
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.api.geospatial_routes:app --bind 0.0.0.0:8081
+gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.api.geospatial_routes:app --bind 0.0.0.0:8000
 
 # Or use the main.py entry point
-python main.py --api --port 8081
+python main.py --api --port 8000
 ```
 
 ### Docker Deployment
@@ -522,13 +522,13 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
-EXPOSE 8081
+EXPOSE 8000
 
 # Create output directory
 RUN mkdir -p output
 
 # Run API server by default
-CMD ["python", "main.py", "--api", "--port", "8081"]
+CMD ["python", "main.py", "--api", "--port", "8000"]
 ```
 
 ### Environment Variables for Production

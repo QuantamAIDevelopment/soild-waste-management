@@ -6,7 +6,7 @@ from datetime import datetime
 from loguru import logger
 
 # Configuration
-BASE_URL = "http://127.0.0.1:8081"
+BASE_URL = "http://127.0.0.1:8000"
 API_KEY = "swm-2024-secure-key"
 
 headers = {
@@ -101,7 +101,7 @@ def check_output_files():
 if __name__ == "__main__":
     print(f"🚀 Starting SWM Agent Scheduler Tests at {datetime.now()}")
     print(f"🌐 Base URL: {BASE_URL}")
-    print("📝 Make sure the FastAPI server is running with: python main.py --api --port 8081")
+    print("📝 Make sure the FastAPI server is running with: python main.py --api --port 8000")
     
     # Wait a moment for server to be ready
     print("\n⏳ Waiting 3 seconds for server...")
