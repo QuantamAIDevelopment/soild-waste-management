@@ -20,6 +20,7 @@ spec:
         ports:
         - containerPort: 8081
         env:
+        # SWM API configuration
         - name: SWM_API_BASE_URL
           valueFrom:
             secretKeyRef:
@@ -36,6 +37,12 @@ spec:
               name: swm-route-optimizer-secrets
               key: SWM_PASSWORD
         # SWM_TOKEN removed - will be generated dynamically at runtime
+        # Application configuration
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: swm-route-optimizer-secrets
+              key: API_KEY
         - name: EXTERNAL_UPLOAD_URL
           valueFrom:
             secretKeyRef:

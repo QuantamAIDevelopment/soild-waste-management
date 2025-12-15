@@ -1,5 +1,5 @@
 trigger:
-- main   # change if needed
+- none   # change if needed
 
 pool:
   vmImage: ubuntu-latest
@@ -9,6 +9,16 @@ variables:
   acrLoginServer: "$(acrName).azurecr.io"
   imageName: "swm-route-optimizer"      # change this to your service name
   buildTag: "$(Build.BuildId)"
+
+# Required Pipeline Variables (set in Azure DevOps Pipeline Variables):
+# - SWM_API_BASE_URL: SWM API base URL
+# - SWM_USERNAME: SWM API username
+# - SWM_PASSWORD: SWM API password (mark as secret)
+# - SWM_TOKEN: SWM API token (mark as secret, can be empty if generated at runtime)
+# - API_KEY: Application API key (mark as secret)
+# - EXTERNAL_UPLOAD_URL: External upload endpoint URL
+# - PORT: Application port (default: 8081)
+# - DEBUG: Debug mode (true/false)
 
 steps:
 
@@ -47,7 +57,24 @@ steps:
     contents: "manifests/**/*.yaml"              # folder `manifests/`
     targetFolder: "$(Build.ArtifactStagingDirectory)/manifests"
 
-# 5. Publish Manifests as Build Artifact
+# 5. Replace Variables in Kubernetes Manifests
+- task: replacetokens@5
+  displayName: "Replace Variables in Secrets"
+  inputs:
+    rootDirectory: "$(Build.ArtifactStagingDirectory)/manifests"
+    targetFiles: "**/*.yaml"
+    encoding: "auto"
+    tokenPattern: "azpipelines"
+    writeBOM: true
+    actionOnMissing: "warn"
+    keepToken: false
+    actionOnNoFiles: "continue"
+    enableTransforms: false
+    enableRecursion: false
+    useLegacyPattern: false
+    enableTelemetry: true
+
+# 6. Publish Manifests as Build Artifact
 - task: PublishBuildArtifacts@1
   displayName: "Publish Manifest Artifact"
   inputs:

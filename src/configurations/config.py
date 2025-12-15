@@ -3,9 +3,6 @@ import os
 from typing import Optional
 
 class Config:
-    # Database settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:Nagalakshmi10%40@localhost:5432/swm")
-    
     # Spatial reference system
     TARGET_CRS: str = "EPSG:3857"  # Web Mercator for distance calculations
     
