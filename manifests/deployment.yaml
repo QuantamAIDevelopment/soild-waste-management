@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: swm-route-optimizer
+  namespace: default
   labels:
     app: swm-route-optimizer
 spec:
@@ -21,7 +22,7 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            # SWM API configuration
+            # Secrets from Release Pipeline → Kubernetes Secret
             - name: SWM_API_BASE_URL
               valueFrom:
                 secretKeyRef:
@@ -37,23 +38,20 @@ spec:
                 secretKeyRef:
                   name: swm-route-optimizer-secrets
                   key: SWM_PASSWORD
-
-            # Application configuration
             - name: EXTERNAL_UPLOAD_URL
               valueFrom:
                 secretKeyRef:
                   name: swm-route-optimizer-secrets
                   key: EXTERNAL_UPLOAD_URL
-            - name: PORT
-              valueFrom:
-                secretKeyRef:
-                  name: swm-route-optimizer-secrets
-                  key: PORT
             - name: DEBUG
               valueFrom:
                 secretKeyRef:
                   name: swm-route-optimizer-secrets
                   key: DEBUG
+
+            # Non-secret config
+            - name: PORT
+              value: "8000"
 
           resources:
             requests:
