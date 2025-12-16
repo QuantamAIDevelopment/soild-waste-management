@@ -4,10 +4,10 @@ metadata:
   name: swm-route-optimizer
   namespace: default
 spec:
+  type: LoadBalancer
   selector:
     app: swm-route-optimizer
   ports:
     - protocol: TCP
       port: 80
       targetPort: 8000
-  type: ClusterIP
