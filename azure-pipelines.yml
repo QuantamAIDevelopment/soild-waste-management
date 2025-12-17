@@ -95,7 +95,7 @@ stages:
               namespace: $(k8sNamespace)
               enableVariableSubstitution: true   # 🔥 CRITICAL
               manifests: |
-                $(System.DefaultWorkingDirectory)/manifests/secrets.yaml
-                $(System.DefaultWorkingDirectory)/manifests/deployment.yaml
-                $(System.DefaultWorkingDirectory)/manifests/service.yaml
+                $(System.DefaultWorkingDirectory)/manifests/manifests/secrets.yaml
+                $(System.DefaultWorkingDirectory)/manifests/manifests/deployment.yaml
+                $(System.DefaultWorkingDirectory)/manifests/manifests/service.yaml
 
