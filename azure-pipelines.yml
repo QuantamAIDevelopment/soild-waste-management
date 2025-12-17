@@ -1,53 +1,101 @@
 trigger:
-  - none  # Enable when ready
-
-pool:
-  vmImage: ubuntu-latest
+- none   # enable when ready
 
 variables:
   acrName: allvysharedacr
   acrLoginServer: $(acrName).azurecr.io
   imageName: swm-route-optimizer
-  buildTag: $(Build.BuildId)
+  k8sNamespace: default
 
-steps:
-  - checkout: self
-    clean: true
-    displayName: Checkout source code
+stages:
 
-  - task: AzureCLI@2
-    displayName: Azure Login and ACR Login
-    inputs:
-      azureSubscription: agent-route-final-sc
-      scriptType: bash
-      scriptLocation: inlineScript
-      inlineScript: |
-        echo "Logging into ACR..."
-        az acr login --name $(acrName)
+# =========================
+# STAGE 1 — BUILD
+# =========================
+- stage: Build
+  displayName: Build & Push Image
+  jobs:
+  - job: BuildJob
+    displayName: Build Multi-Arch Image
+    pool:
+      vmImage: ubuntu-latest
 
-  - script: |
-      docker buildx create --name multiarch-builder --use
-      docker buildx inspect --bootstrap
-    displayName: Enable Docker Buildx
+    steps:
+    - checkout: self
+      clean: true
+      displayName: Checkout source code
 
-  - script: |
-      docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        -t $(acrLoginServer)/$(imageName):$(buildTag) \
-        -t $(acrLoginServer)/$(imageName):latest \
-        --push \
-        .
-    displayName: Build and Push Multi-Arch Docker Image
+    - task: AzureCLI@2
+      displayName: Azure Login and ACR Login
+      inputs:
+        azureSubscription: agent-route-final-sc
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az acr login --name $(acrName)
 
-  - task: CopyFiles@2
-    displayName: Copy Kubernetes Manifests
-    inputs:
-      contents: manifests/**/*.yaml
-      targetFolder: $(Build.ArtifactStagingDirectory)/manifests
+    - script: |
+        docker buildx create --use
+        docker buildx inspect --bootstrap
+      displayName: Enable Docker Buildx
 
-  - task: PublishBuildArtifacts@1
-    displayName: Publish Manifest Artifact
-    inputs:
-      pathToPublish: $(Build.ArtifactStagingDirectory)/manifests
-      artifactName: manifests
-      publishLocation: Container
+    - script: |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          -t $(acrLoginServer)/$(imageName):$(Build.BuildId) \
+          --push \
+          .
+      displayName: Build and Push Multi-Arch Docker Image
+
+    - task: CopyFiles@2
+      displayName: Copy Kubernetes Manifests
+      inputs:
+        contents: manifests/**/*.yaml
+        targetFolder: $(Build.ArtifactStagingDirectory)/manifests
+
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Manifest Artifact
+      inputs:
+        pathToPublish: $(Build.ArtifactStagingDirectory)/manifests
+        artifactName: manifests
+
+
+# =========================
+# STAGE 2 — DEPLOY
+# =========================
+- stage: Deploy
+  displayName: Deploy to AKS
+  dependsOn: Build
+  jobs:
+  - deployment: DeployJob
+    displayName: AKS Deployment
+    environment: aks-prod
+    pool:
+      vmImage: ubuntu-latest
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - task: DownloadBuildArtifacts@1
+            displayName: Download Manifests
+            inputs:
+              buildType: current
+              artifactName: manifests
+              downloadPath: $(System.DefaultWorkingDirectory)
+
+          - task: KubernetesManifest@1
+            displayName: Deploy to AKS
+            inputs:
+              action: deploy
+              connectionType: azureResourceManager
+              azureSubscriptionConnection: agent-route-final-sc
+              azureResourceGroup: rg-allvy-core-infra
+              kubernetesCluster: allvy-apps-aks
+              namespace: $(k8sNamespace)
+              enableVariableSubstitution: true   # 🔥 CRITICAL
+              manifests: |
+                $(System.DefaultWorkingDirectory)/manifests/secrets.yaml
+                $(System.DefaultWorkingDirectory)/manifests/deployment.yaml
+                $(System.DefaultWorkingDirectory)/manifests/service.yaml
+
