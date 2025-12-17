@@ -4,13 +4,14 @@ import requests
 from typing import Optional, Dict, Any
 from loguru import logger
 from dotenv import load_dotenv
+from ..configurations.config import Config
 
 load_dotenv()
 
 class WardGeoJSONService:
     def __init__(self):
-        self.base_url = os.getenv('SWM_API_BASE_URL')
-        self.token = os.getenv('SWM_TOKEN')
+        self.base_url = Config.SWM_API_BASE_URL
+        self.token = Config.SWM_TOKEN
         
     def _get_headers(self) -> Dict[str, str]:
         """Get authorization headers."""

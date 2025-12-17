@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
+import pandas as pd
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +18,7 @@ from src.routing.compute_routes import RouteComputer
 from src.routing.get_osrm_directions import OSRMDirectionsProvider
 from src.visualization.export_to_geojson import RouteExporter
 from src.visualization.folium_map import FoliumMapGenerator
+from src.configurations.config import Config
 
 class GeospatialRouteOptimizer:
     """Complete geospatial AI routing system for garbage collection."""
@@ -171,7 +173,7 @@ def main():
     parser.add_argument("--output", default="output", help="Output directory")
     parser.add_argument("--osrm-url", default="http://router.project-osrm.org", help="OSRM server URL")
     parser.add_argument("--api", action="store_true", help="Start FastAPI server instead")
-    parser.add_argument("--port", type=int, default=int(os.getenv('PORT', 8000)), help="Port for FastAPI server (default: from PORT env or 8000)")
+    parser.add_argument("--port", type=int, default=Config.PORT, help="Port for FastAPI server (default: from PORT env or 8000)")
     
     args = parser.parse_args()
     

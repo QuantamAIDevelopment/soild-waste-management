@@ -31,12 +31,16 @@ from loguru import logger
 import warnings
 import requests
 from dotenv import load_dotenv
+from src.configurations.config import Config
+
+# Load environment variables
+load_dotenv()
 
 # Suppress specific geographic CRS warnings for intentional lat/lon usage in maps
 warnings.filterwarnings('ignore', message='.*Geometry is in a geographic CRS.*')
 
-# API Key for authentication - Change this in production!
-API_KEY = "swm-2024-secure-key"
+# API Key for authentication from config
+API_KEY = Config.API_KEY
 
 # Security scheme
 security = HTTPBearer()
@@ -812,8 +816,8 @@ async def get_cluster_route_coordinates():
         try:
             load_dotenv()
             
-            external_url = os.getenv('EXTERNAL_UPLOAD_URL')
-            swm_token = os.getenv('SWM_TOKEN')
+            external_url = Config.EXTERNAL_UPLOAD_URL
+            swm_token = Config.SWM_TOKEN
             
             if external_url and swm_token:
                 # Clean the URL and ensure proper endpoint
@@ -1635,8 +1639,8 @@ async def assign_routes_by_vehicle(vehicle_ids: str = Form(..., description="Com
 async def test_ward_api(ward_no: str):
     """Test ward API endpoint to see what data is returned."""
     try:
-        base_url = os.getenv('SWM_API_BASE_URL')
-        token = os.getenv('SWM_TOKEN', '').strip("'")
+        base_url = Config.SWM_API_BASE_URL
+        token = Config.SWM_TOKEN.strip("'")
         
         url = f"{base_url}/api/ward-geojson/{ward_no}"
         headers = {

@@ -6,17 +6,18 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dotenv import load_dotenv, set_key
 from loguru import logger
+from ..configurations.config import Config
 
 # Load environment variables
 load_dotenv()
 
 class AuthService:
     def __init__(self):
-        self.base_url = os.getenv('SWM_API_BASE_URL')
-        self.username = os.getenv('SWM_USERNAME')
-        self.password = os.getenv('SWM_PASSWORD')
+        self.base_url = Config.SWM_API_BASE_URL
+        self.username = Config.SWM_USERNAME
+        self.password = Config.SWM_PASSWORD
         self.env_file = '.env'
-        self._current_token = os.getenv('SWM_TOKEN')
+        self._current_token = Config.SWM_TOKEN
         self._token_expiry = self._get_token_expiry(self._current_token) if self._current_token else None
         logger.info("AuthService initialized for local use only")
     

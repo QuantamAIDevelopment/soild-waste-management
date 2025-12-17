@@ -6,14 +6,15 @@ from typing import List, Dict, Optional
 from loguru import logger
 from dotenv import load_dotenv
 from .auth_service import AuthService
+from ..configurations.config import Config
 
 # Load environment variables
 load_dotenv()
 
 class VehicleService:
     def __init__(self):
-        self.base_url = os.getenv('SWM_API_BASE_URL', 'https://uat-swm-main-service-hdaqcdcscbfedhhn.centralindia-01.azurewebsites.net')
-        self.api_key = os.getenv('SWM_API_KEY', '')
+        self.base_url = Config.SWM_API_BASE_URL
+        self.api_key = Config.API_KEY
         self.session = requests.Session()
         self.auth_service = AuthService()
         
