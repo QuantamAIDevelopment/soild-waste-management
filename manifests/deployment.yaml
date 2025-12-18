@@ -17,8 +17,8 @@ spec:
     spec:
       containers:
         - name: swm-route-optimizer
-          image: allvysharedacr.azurecr.io/swm-route-optimizer:$(Build.BuildId)
-          imagePullPolicy: IfNotPresent
+          image: allvysharedacr.azurecr.io/swm-route-optimizer:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
