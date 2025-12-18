@@ -1,0 +1,49 @@
+trigger: none
+
+variables:
+  k8sNamespace: default
+
+resources:
+  pipelines:
+  - pipeline: buildPipeline
+    source: swm-route-optimizer-build   # CI pipeline name
+    trigger: none
+
+stages:
+- stage: Deploy
+  displayName: Deploy to AKS
+  jobs:
+  - deployment: DeployJob
+    environment: aks-prod
+    pool:
+      vmImage: ubuntu-latest
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          # 🔽 DOWNLOAD MANIFESTS (REQUIRED)
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Kubernetes Manifests
+            inputs:
+              source: specific
+              pipeline: swm-route-optimizer-build
+              artifact: manifests
+              path: $(Pipeline.Workspace)/manifests
+
+          # 🚀 DEPLOY TO AKS
+          - task: KubernetesManifest@1
+            displayName: Deploy to AKS
+            inputs:
+              action: deploy
+              connectionType: azureResourceManager
+              azureSubscriptionConnection: agent-route-final-sc
+              azureResourceGroup: rg-allvy-core-infra
+              kubernetesCluster: allvy-apps-aks
+              namespace: $(k8sNamespace)
+              enableVariableSubstitution: true
+              manifests: |
+                $(Pipeline.Workspace)/manifests/secrets.yaml
+                $(Pipeline.Workspace)/manifests/deployment.yaml
+                $(Pipeline.Workspace)/manifests/service.yaml
