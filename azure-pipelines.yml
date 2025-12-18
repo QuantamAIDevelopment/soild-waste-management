@@ -1,32 +1,26 @@
+# azure-pipelines-build.yml
 trigger:
-- none   # enable when ready
+- main   # or none if you want manual
 
 variables:
   acrName: allvysharedacr
   acrLoginServer: $(acrName).azurecr.io
   imageName: swm-route-optimizer
-  k8sNamespace: default
 
 stages:
-
-# =========================
-# STAGE 1 — BUILD
-# =========================
 - stage: Build
   displayName: Build & Push Image
   jobs:
   - job: BuildJob
-    displayName: Build Multi-Arch Image
     pool:
       vmImage: ubuntu-latest
 
     steps:
     - checkout: self
       clean: true
-      displayName: Checkout source code
 
     - task: AzureCLI@2
-      displayName: Azure Login and ACR Login
+      displayName: Azure Login + ACR Login
       inputs:
         azureSubscription: agent-route-final-sc
         scriptType: bash
@@ -43,59 +37,19 @@ stages:
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
           -t $(acrLoginServer)/$(imageName):$(Build.BuildId) \
+          -t $(acrLoginServer)/$(imageName):latest \
           --push \
           .
-      displayName: Build and Push Multi-Arch Docker Image
+      displayName: Build & Push Image
 
     - task: CopyFiles@2
-      displayName: Copy Kubernetes Manifests
+      displayName: Copy K8s Manifests
       inputs:
         contents: manifests/**/*.yaml
         targetFolder: $(Build.ArtifactStagingDirectory)/manifests
 
     - task: PublishBuildArtifacts@1
-      displayName: Publish Manifest Artifact
+      displayName: Publish Manifests
       inputs:
         pathToPublish: $(Build.ArtifactStagingDirectory)/manifests
         artifactName: manifests
-
-
-# =========================
-# STAGE 2 — DEPLOY
-# =========================
-- stage: Deploy
-  displayName: Deploy to AKS
-  dependsOn: Build
-  jobs:
-  - deployment: DeployJob
-    displayName: AKS Deployment
-    environment: aks-prod
-    pool:
-      vmImage: ubuntu-latest
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-
-          - task: DownloadBuildArtifacts@1
-            displayName: Download Manifests
-            inputs:
-              buildType: current
-              artifactName: manifests
-              downloadPath: $(System.DefaultWorkingDirectory)
-
-          - task: KubernetesManifest@1
-            displayName: Deploy to AKS
-            inputs:
-              action: deploy
-              connectionType: azureResourceManager
-              azureSubscriptionConnection: agent-route-final-sc
-              azureResourceGroup: rg-allvy-core-infra
-              kubernetesCluster: allvy-apps-aks
-              namespace: $(k8sNamespace)
-              enableVariableSubstitution: true   # 🔥 CRITICAL
-              manifests: |
-                $(System.DefaultWorkingDirectory)/manifests/manifests/secrets.yaml
-                $(System.DefaultWorkingDirectory)/manifests/manifests/deployment.yaml
-                $(System.DefaultWorkingDirectory)/manifests/manifests/service.yaml
-
