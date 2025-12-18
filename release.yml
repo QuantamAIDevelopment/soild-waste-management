@@ -41,6 +41,6 @@ stages:
               namespace: $(k8sNamespace)
               enableVariableSubstitution: true
               manifests: |
-                $(System.DefaultWorkingDirectory)/manifests/service.yaml
-                $(System.DefaultWorkingDirectory)/manifests/deployment.yaml
-                $(System.DefaultWorkingDirectory)/manifests/secrets.yaml
+                $(System.DefaultWorkingDirectory)/service.yaml
+                $(System.DefaultWorkingDirectory)/deployment.yaml
+                $(System.DefaultWorkingDirectory)/secrets.yaml
