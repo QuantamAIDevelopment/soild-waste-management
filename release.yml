@@ -14,6 +14,7 @@ stages:
   displayName: Deploy to AKS
   jobs:
   - deployment: DeployJob
+    displayName: AKS Deployment
     environment: aks-prod
     pool:
       vmImage: ubuntu-latest
@@ -23,12 +24,12 @@ stages:
         deploy:
           steps:
 
-          # 🔽 DOWNLOAD MANIFESTS (REQUIRED)
+          # 🔽 DOWNLOAD MANIFESTS FROM CI PIPELINE
           - task: DownloadPipelineArtifact@2
             displayName: Download Kubernetes Manifests
             inputs:
-              source: specific
-              pipeline: swm-route-final-build
+              source: pipeline
+              pipeline: routefinal          # alias from resources
               artifact: manifests
               path: $(Pipeline.Workspace)/manifests
 
@@ -45,5 +46,5 @@ stages:
               enableVariableSubstitution: true
               manifests: |
                 $(Pipeline.Workspace)/manifests/manifests/secrets.yaml
-                $(Pipeline.Workspace)/manifests//manifests/deployment.yaml
+                $(Pipeline.Workspace)/manifests/manifests/deployment.yaml
                 $(Pipeline.Workspace)/manifests/manifests/service.yaml
