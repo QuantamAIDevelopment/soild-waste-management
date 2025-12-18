@@ -45,11 +45,10 @@ stages:
     - task: CopyFiles@2
       displayName: Copy K8s Manifests
       inputs:
-        contents: manifests/**/*.yaml
-        targetFolder: $(Build.ArtifactStagingDirectory)/manifests
-
+        contents: manifests/*.yaml
+        targetFolder: $(Build.ArtifactStagingDirectory)
     - task: PublishBuildArtifacts@1
       displayName: Publish Manifests
       inputs:
-        pathToPublish: $(Build.ArtifactStagingDirectory)/manifests
+        pathToPublish: $(Build.ArtifactStagingDirectory)
         artifactName: manifests
