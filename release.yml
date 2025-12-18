@@ -6,7 +6,7 @@ variables:
 resources:
   pipelines:
   - pipeline: routefinal
-    source: swm-route-optimizer-build   # CI pipeline name
+    source: swm-route-final-build   # CI pipeline name
     trigger: none
 
 stages:
