@@ -28,7 +28,7 @@ stages:
             displayName: Download Kubernetes Manifests
             inputs:
               source: specific
-              pipeline: swm-route-optimizer-build
+              pipeline: swm-route-final-build
               artifact: manifests
               path: $(Pipeline.Workspace)/manifests
 
