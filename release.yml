@@ -5,7 +5,7 @@ variables:
 
 resources:
   pipelines:
-  - pipeline: buildPipeline
+  - pipeline: routefinal
     source: swm-route-optimizer-build   # CI pipeline name
     trigger: none
 
@@ -44,6 +44,6 @@ stages:
               namespace: $(k8sNamespace)
               enableVariableSubstitution: true
               manifests: |
-                $(Pipeline.Workspace)/manifests/secrets.yaml
-                $(Pipeline.Workspace)/manifests/deployment.yaml
-                $(Pipeline.Workspace)/manifests/service.yaml
+                $(Pipeline.Workspace)/manifests/manifests/secrets.yaml
+                $(Pipeline.Workspace)/manifests//manifests/deployment.yaml
+                $(Pipeline.Workspace)/manifests/manifests/service.yaml
