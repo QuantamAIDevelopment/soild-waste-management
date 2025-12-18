@@ -27,7 +27,7 @@ stages:
               pipeline: swm-route-final-build
               runVersion: latest
               artifact: manifests
-              path: $(Pipeline.Workspace)/manifests
+              path: $(System.DefaultWorkingDirectory)
 
           # 🚀 DEPLOY TO AKS
           - task: KubernetesManifest@1
@@ -41,6 +41,6 @@ stages:
               namespace: $(k8sNamespace)
               enableVariableSubstitution: true
               manifests: |
-                $(Pipeline.Workspace)/manifests/manifests/secrets.yaml
-                $(Pipeline.Workspace)/manifests/manifests/deployment.yaml
-                $(Pipeline.Workspace)/manifests/manifests/service.yaml
+                $(System.DefaultWorkingDirectory)/manifests/service.yaml
+                $(System.DefaultWorkingDirectory)/manifests/deployment.yaml
+                $(System.DefaultWorkingDirectory)/manifests/secrets.yaml
