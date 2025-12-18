@@ -3,12 +3,6 @@ trigger: none
 variables:
   k8sNamespace: default
 
-resources:
-  pipelines:
-  - pipeline: routefinal
-    source: swm-route-final-build   # CI pipeline name
-    trigger: none
-
 stages:
 - stage: Deploy
   displayName: Deploy to AKS
@@ -24,12 +18,14 @@ stages:
         deploy:
           steps:
 
-          # 🔽 DOWNLOAD MANIFESTS FROM CI PIPELINE
+          # 🔽 DOWNLOAD MANIFESTS (SPECIFIC PROJECT + PIPELINE)
           - task: DownloadPipelineArtifact@2
             displayName: Download Kubernetes Manifests
             inputs:
-              source: pipeline
-              pipeline: routefinal          # alias from resources
+              source: specific
+              project: SWM-ROUTE-FINAL        # 🔴 REQUIRED
+              pipeline: swm-route-final-build
+              runVersion: latest
               artifact: manifests
               path: $(Pipeline.Workspace)/manifests
 
