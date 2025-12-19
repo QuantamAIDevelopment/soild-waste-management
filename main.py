@@ -178,18 +178,17 @@ def main():
     args = parser.parse_args()
     
     if args.api:
-        # Refresh token before starting API server
-        from src.services.auth_service import AuthService
-        auth_service = AuthService()
-        logger.info("🔑 Refreshing authentication token...")
-        if auth_service.refresh_token():
-            logger.success("✅ Token refreshed successfully")
-        else:
-            logger.warning("⚠️ Token refresh failed, using existing token")
+        # Start FastAPI server (no authentication required for public APIs)
+        logger.info("🌐 Using public APIs - no authentication required")
         
         # Start FastAPI server
-        import uvicorn
-        from src.api.geospatial_routes import app
+        try:
+            import uvicorn
+            from src.api.geospatial_routes import app
+        except ImportError as e:
+            logger.error(f"❌ Failed to import required modules: {e}")
+            logger.info("💡 Make sure all dependencies are installed: pip install -r requirements.txt")
+            sys.exit(1)
         logger.info(f"🚀 Starting FastAPI server on port {args.port}...")
         try:
             uvicorn.run(app, host="0.0.0.0", port=args.port)
@@ -199,6 +198,15 @@ def main():
                 logger.info("💡 Example: python main.py --api --port 8082")
             else:
                 logger.error(f"❌ Server startup failed: {e}")
+            sys.exit(1)
+        except ImportError as e:
+            logger.error(f"❌ Import error: {e}")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            logger.info("🛑 Server stopped by user")
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"❌ Unexpected server error: {e}")
             sys.exit(1)
     else:
         # Validate required arguments for CLI mode

@@ -13,12 +13,22 @@ load_dotenv()
 
 class AuthService:
     def __init__(self):
+        # API configuration
         self.base_url = Config.SWM_API_BASE_URL
-        self.username = Config.SWM_USERNAME
-        self.password = Config.SWM_PASSWORD
+        # Note: Credentials not configured - service operates in read-only mode
+        self.username = os.getenv('SWM_USERNAME', '')
+        self.password = os.getenv('SWM_PASSWORD', '')
+        self._auth_configured = bool(self.username and self.password)
+        
+        # Token management
         self.env_file = '.env'
-        self._current_token = Config.SWM_TOKEN
-        self._token_expiry = self._get_token_expiry(self._current_token) if self._current_token else None
+        self._current_token = os.getenv('SWM_TOKEN', '')
+        try:
+            self._token_expiry = self._get_token_expiry(self._current_token) if self._current_token else None
+        except Exception:
+            self._token_expiry = None
+        self._token_available = bool(self._current_token)
+        
         logger.info("AuthService initialized for local use only")
     
     def _get_token_expiry(self, token: str) -> Optional[datetime]:
@@ -44,6 +54,9 @@ class AuthService:
     
     def _login_and_get_token(self) -> Optional[str]:
         """Login and get fresh token from API."""
+        if not self._auth_configured:
+            logger.warning("Authentication not configured - credentials missing")
+            return None
         try:
             url = f"{self.base_url}/auth/login"
             login_data = {
@@ -140,8 +153,12 @@ class AuthService:
     
     def get_token_info(self) -> dict:
         """Get information about current token."""
-        if not self._current_token:
-            return {"status": "no_token", "message": "No token available"}
+        if not self._token_available or not self._current_token:
+            return {
+                "status": "no_token", 
+                "message": "No token available",
+                "auth_configured": self._auth_configured
+            }
         
         if not self._token_expiry:
             return {"status": "unknown_expiry", "token_length": len(self._current_token)}

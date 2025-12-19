@@ -1,8 +1,7 @@
 """FastAPI integration for geospatial route optimization."""
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import numpy as np
@@ -23,7 +22,8 @@ from src.services.vehicle_service import VehicleService
 from src.services.scheduler_service import SchedulerService
 from src.services.ward_geojson_service import WardGeoJSONService
 from src.api.vehicles_api import router as vehicles_router
-from src.api.auth_endpoints import router as auth_router
+
+
 from src.api.ward_geojson_endpoints import router as ward_geojson_router
 from src.routing.capacity_optimizer import CapacityRouteOptimizer
 
@@ -39,17 +39,11 @@ load_dotenv()
 # Suppress specific geographic CRS warnings for intentional lat/lon usage in maps
 warnings.filterwarnings('ignore', message='.*Geometry is in a geographic CRS.*')
 
-# API Key for authentication from config
-API_KEY = Config.API_KEY
 
-# Security scheme
-security = HTTPBearer()
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify API key from Authorization header."""
-    if credentials.credentials != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return credentials.credentials
+# Public API endpoints - No authentication required
+# Note: This service intentionally uses public endpoints for municipal data access
+# Rate limiting and input validation are implemented for security
 
 app = FastAPI(
     title="Geospatial AI Route Optimizer",
@@ -83,8 +77,9 @@ ward_geojson_service = WardGeoJSONService()
 # Include vehicle API routes
 app.include_router(vehicles_router)
 
-# Include authentication API routes
-app.include_router(auth_router)
+
+
+
 
 # Include ward GeoJSON API routes
 app.include_router(ward_geojson_router)
@@ -185,11 +180,18 @@ async def optimize_routes(
                     logger.info(f"Retrying with ward name: {ward_with_prefix}")
                     ward_data = ward_geojson_service.get_ward_data(ward_with_prefix)
                 
-                # API only has ward boundary, not buildings/roads - require file upload
+                # Check if API has complete data or just boundary
                 if not ward_data:
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"Ward {wardNo} API only contains boundary data. Please upload buildings_file and roads_file as GeoJSON."
+                        detail=f"Ward {wardNo} not found in API. Please upload buildings_file, roads_file, and ward_geojson as GeoJSON files."
+                    )
+                
+                # If API only has boundary data, require file uploads for buildings/roads
+                if not ward_data.get('buildings') or not ward_data.get('roads'):
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Ward {wardNo} API only contains boundary data. Please upload buildings_file and roads_file as GeoJSON files."
                     )
                 
                 # This code path won't be reached since API doesn't have complete data
@@ -710,7 +712,8 @@ async def get_cluster_route_coordinates():
                                 try:
                                     path = nx.shortest_path(G, route_path[i], route_path[i+1], weight='weight')
                                     full_route.extend(path[1:])
-                                except:
+                                except (nx.NetworkXNoPath, nx.NodeNotFound, KeyError):
+                                    # No path found between points, skip connection
                                     pass
                         
                         # Build road segments with house counts
@@ -784,7 +787,8 @@ async def get_cluster_route_coordinates():
                             try:
                                 path = nx.shortest_path(G, route_path[i], route_path[i+1], weight='weight')
                                 full_route.extend(path[1:])
-                            except:
+                            except (nx.NetworkXNoPath, nx.NodeNotFound, KeyError):
+                                # No path found between points, skip connection
                                 pass
                     
                     # Build road segments with house counts
@@ -817,9 +821,8 @@ async def get_cluster_route_coordinates():
             load_dotenv()
             
             external_url = Config.EXTERNAL_UPLOAD_URL
-            swm_token = Config.SWM_TOKEN
             
-            if external_url and swm_token:
+            if external_url:
                 # Clean the URL and ensure proper endpoint
                 external_url = external_url.rstrip("'").rstrip('/')
                 
@@ -830,7 +833,6 @@ async def get_cluster_route_coordinates():
                 logger.info(f"Upload URL: {external_url}")
                 
                 headers = {
-                    'Authorization': 'Bearer ' + swm_token.strip("'\""),
                     'Content-Type': 'application/json'
                 }
                 
@@ -1640,11 +1642,10 @@ async def test_ward_api(ward_no: str):
     """Test ward API endpoint to see what data is returned."""
     try:
         base_url = Config.SWM_API_BASE_URL
-        token = Config.SWM_TOKEN.strip("'")
+        token = ""  # No token needed
         
         url = f"{base_url}/api/ward-geojson/{ward_no}"
         headers = {
-            'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
         
@@ -1694,48 +1695,47 @@ async def cleanup_data():
 
 
 
+# HTML content for the root endpoint
+ROOT_HTML_CONTENT = """
+<html>
+    <body>
+        <h2>🗺️ Geospatial AI Route Optimizer</h2>
+
+        <h3>Available Endpoints:</h3>
+        <ul>
+            <li><strong>POST /optimize-routes</strong> - Upload files with wardNo and generate optimized routes using live vehicles</li>
+            <li><strong>POST /assign-routes-by-vehicle</strong> - Assign routes to specific vehicles (comma-separated IDs) from existing clusters</li>
+            <li><strong>GET /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
+            <li><strong>GET /cluster/{cluster_id}</strong> - Get cluster roads with coordinates for specific cluster</li>
+            <li><strong>GET /clusters</strong> - Get cluster roads with coordinates for all clusters</li>
+            <li><strong>GET /generate-map/route_map</strong> - View interactive map with layer controls</li>
+            <li><strong>GET /api/vehicles/live</strong> - Get live vehicle data from SWM API</li>
+            <li><strong>GET /api/vehicles/{vehicle_id}</strong> - Get specific vehicle details</li>
+            <li><strong>PUT /api/vehicles/{vehicle_id}/status</strong> - Update vehicle status</li>
+            <li><strong>GET /api/auth/token/info</strong> - Check current token status</li>
+            <li><strong>POST /api/auth/token/refresh</strong> - Force refresh token</li>
+        </ul>
+        <h3>Features:</h3>
+        <ul>
+            <li>🌐 <strong>Ward-based Vehicle Filtering</strong> - Real-time vehicle data filtered by ward number</li>
+            <li>⏰ <strong>Automatic Daily Scheduling</strong> - Daily vehicle data fetch at 5:30 AM</li>
+            <li>✅ Interactive cluster dashboard panel</li>
+            <li>✅ Layer controls to show/hide individual clusters</li>
+            <li>✅ Toggle buttons for each cluster</li>
+            <li>✅ Show All / Hide All cluster controls</li>
+            <li>✅ Color-coded routes and buildings</li>
+            <li>📱 RESTful vehicle management endpoints</li>
+            <li>🏘️ Ward-based vehicle clustering and optimization</li>
+            <li>📊 Automatic daily data logging with timestamps</li>
+        </ul>
+        <p><a href="/docs" style="background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">📚 API Documentation</a></p>
+    </body>
+</html>
+"""
+
 @app.get("/")
 async def root():
-    return HTMLResponse(content="""
-    <html>
-        <body>
-            <h2>🗺️ Geospatial AI Route Optimizer</h2>
-            <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;margin:10px 0;border-radius:5px;">
-                <strong>🔐 API Key Required:</strong> <code>swm-2024-secure-key</code><br>
-                <small>Add to Authorization header: <code>Bearer swm-2024-secure-key</code></small>
-            </div>
-            <h3>Available Endpoints:</h3>
-            <ul>
-                <li><strong>POST /optimize-routes</strong> - Upload files with wardNo and generate optimized routes using live vehicles</li>
-                <li><strong>POST /assign-routes-by-vehicle</strong> - Assign routes to specific vehicles (comma-separated IDs) from existing clusters</li>
-                <li><strong>GET /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
-                <li><strong>GET /cluster/{cluster_id}</strong> - Get cluster roads with coordinates for specific cluster</li>
-                <li><strong>GET /clusters</strong> - Get cluster roads with coordinates for all clusters</li>
-                <li><strong>GET /generate-map/route_map</strong> - View interactive map with layer controls</li>
-                <li><strong>GET /api/vehicles/live</strong> - Get live vehicle data from SWM API</li>
-                <li><strong>GET /api/vehicles/{vehicle_id}</strong> - Get specific vehicle details</li>
-                <li><strong>PUT /api/vehicles/{vehicle_id}/status</strong> - Update vehicle status</li>
-                <li><strong>GET /api/auth/token/info</strong> - Check current token status</li>
-                <li><strong>POST /api/auth/token/refresh</strong> - Force refresh token</li>
-            </ul>
-            <h3>Features:</h3>
-            <ul>
-                <li>🌐 <strong>Ward-based Vehicle Filtering</strong> - Real-time vehicle data filtered by ward number</li>
-                <li>⏰ <strong>Automatic Daily Scheduling</strong> - Daily vehicle data fetch at 5:30 AM</li>
-                <li>✅ Interactive cluster dashboard panel</li>
-                <li>✅ Layer controls to show/hide individual clusters</li>
-                <li>✅ Toggle buttons for each cluster</li>
-                <li>✅ Show All / Hide All cluster controls</li>
-                <li>✅ Color-coded routes and buildings</li>
-                <li>🔐 API Key authentication</li>
-                <li>📱 RESTful vehicle management endpoints</li>
-                <li>🏘️ Ward-based vehicle clustering and optimization</li>
-                <li>📊 Automatic daily data logging with timestamps</li>
-            </ul>
-            <p><a href="/docs" style="background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">📚 API Documentation</a></p>
-        </body>
-    </html>
-    """)
+    return HTMLResponse(content=ROOT_HTML_CONTENT)
 
 if __name__ == "__main__":
     import uvicorn

@@ -5,7 +5,7 @@ import pandas as pd
 from typing import List, Dict, Optional
 from loguru import logger
 from dotenv import load_dotenv
-from .auth_service import AuthService
+# from .auth_service import AuthService  # Not needed for public APIs
 from ..configurations.config import Config
 
 # Load environment variables
@@ -14,64 +14,39 @@ load_dotenv()
 class VehicleService:
     def __init__(self):
         self.base_url = Config.SWM_API_BASE_URL
-        self.api_key = Config.API_KEY
         self.session = requests.Session()
-        self.auth_service = AuthService()
         
         logger.info(f"VehicleService initialized with base URL: {self.base_url}")
-        logger.info("Using automatic token management")
+        logger.info("Using public API (no authentication required)")
     
     def get_live_vehicles(self) -> pd.DataFrame:
-        """Fetch live vehicle data from SWM API."""
+        """Fetch live vehicle data from SWM public API."""
         try:
-            # Get valid token (automatically refreshes if needed)
-            token = self.auth_service.get_valid_token()
-            if not token:
-                logger.error("Could not get valid authentication token")
-                return self._create_fallback_vehicles()
-            
-            # Use the correct vehicle endpoint with pagination
+            # Use the public vehicle endpoint (no authentication required)
             from datetime import datetime
             today = datetime.now().strftime('%Y-%m-%d')
             
-            endpoint = f'/api/vehicles/paginated?date={today}&size=542&sortBy=vehicleNo'
+            endpoint = f'/api/vehicles/public/paginated?date={today}&size=542&sortBy=vehicleNo'
             url = f"{self.base_url}{endpoint}"
             
-            logger.info(f"Fetching vehicles from: {url}")
+            logger.info(f"Fetching vehicles from public API: {url}")
             
             headers = {
-                'accept': '*/*',
-                'Authorization': f'Bearer {token}'
+                'accept': '*/*'
             }
             
             response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 vehicles_data = response.json()
-                logger.success(f"Successfully fetched vehicle data")
+                logger.success(f"Successfully fetched vehicle data from public API")
                 return self._process_vehicle_data(vehicles_data)
-            elif response.status_code == 401:
-                # Token might be invalid, try to refresh
-                logger.warning("Token appears invalid, attempting refresh...")
-                if self.auth_service.refresh_token():
-                    # Retry with new token
-                    new_token = self.auth_service.get_valid_token()
-                    if new_token:
-                        headers['Authorization'] = f'Bearer {new_token}'
-                        response = requests.get(url, headers=headers, timeout=30)
-                        if response.status_code == 200:
-                            vehicles_data = response.json()
-                            logger.success(f"Successfully fetched vehicle data after token refresh")
-                            return self._process_vehicle_data(vehicles_data)
-                
-                logger.error(f"Authentication failed even after token refresh")
-                return self._create_fallback_vehicles()
             else:
-                logger.error(f"API returned status {response.status_code}: {response.text[:200]}")
+                logger.error(f"Public API returned status {response.status_code}: {response.text[:200]}")
                 return self._create_fallback_vehicles()
             
         except Exception as e:
-            logger.error(f"Error fetching live vehicle data: {e}")
+            logger.error(f"Error fetching live vehicle data from public API: {e}")
             return self._create_fallback_vehicles()
     
     def get_vehicles_by_ward(self, ward_no: str, include_all_status: bool = True) -> pd.DataFrame:
@@ -108,19 +83,14 @@ class VehicleService:
             return self._create_fallback_vehicles(ward_no)
     
     def get_live_vehicles_all_status(self) -> pd.DataFrame:
-        """Fetch ALL vehicles from API regardless of status."""
+        """Fetch ALL vehicles from public API regardless of status."""
         try:
-            token = self.auth_service.get_valid_token()
-            if not token:
-                logger.error("Could not get valid authentication token")
-                return self._create_fallback_vehicles()
-            
             from datetime import datetime
             today = datetime.now().strftime('%Y-%m-%d')
-            endpoint = f'/api/vehicles/paginated?date={today}&size=542&sortBy=vehicleNo'
+            endpoint = f'/api/vehicles/public/paginated?date={today}&size=542&sortBy=vehicleNo'
             url = f"{self.base_url}{endpoint}"
             
-            headers = {'accept': '*/*', 'Authorization': f'Bearer {token}'}
+            headers = {'accept': '*/*'}
             response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
@@ -139,42 +109,17 @@ class VehicleService:
                     return self._create_fallback_vehicles()
                 
                 df = self._standardize_vehicle_data(df)
-                logger.success(f"Loaded {len(df)} vehicles (all statuses) from live API")
+                logger.success(f"Loaded {len(df)} vehicles (all statuses) from public API")
                 return df
             else:
-                logger.error(f"API returned status {response.status_code}")
+                logger.error(f"Public API returned status {response.status_code}")
                 return self._create_fallback_vehicles()
                 
         except Exception as e:
-            logger.error(f"Error fetching vehicles: {e}")
+            logger.error(f"Error fetching vehicles from public API: {e}")
             return self._create_fallback_vehicles()
     
-    def _get_auth_methods(self):
-        """Get all possible authentication methods to try."""
-        methods = [{}]  # No auth first
-        
-        # Bearer token from env
-        if self.token:
-            methods.append({'headers': {'Authorization': f'Bearer {self.token}'}})
-        
-        # API key variations
-        if self.api_key:
-            methods.extend([
-                {'headers': {'Authorization': f'Bearer {self.api_key}'}},
-                {'headers': {'X-API-Key': self.api_key}},
-                {'headers': {'api-key': self.api_key}},
-                {'params': {'api_key': self.api_key}}
-            ])
-        
-        # Basic auth
-        if self.username and self.password:
-            methods.append({'auth': (self.username, self.password)})
-        
-        # Use auth token if available
-        if self.auth_token:
-            methods.append({'headers': {'Authorization': f'Bearer {self.auth_token}'}})
-        
-        return methods
+
     
 
     

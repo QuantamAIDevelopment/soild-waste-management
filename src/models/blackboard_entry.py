@@ -33,3 +33,15 @@ class BlackboardEntry:
     data: Dict[str, Any]
     timestamp: datetime
     status: str = "pending"
+    
+    def __post_init__(self):
+        if not self.entry_id or not isinstance(self.entry_id, str):
+            raise ValueError("entry_id must be a non-empty string")
+        if not self.entry_type or not isinstance(self.entry_type, str):
+            raise ValueError("entry_type must be a non-empty string")
+        if not isinstance(self.data, dict):
+            raise ValueError("data must be a dictionary")
+        if not isinstance(self.timestamp, datetime):
+            raise ValueError("timestamp must be a datetime object")
+        if self.status not in ["pending", "processing", "completed", "failed"]:
+            raise ValueError("status must be one of: pending, processing, completed, failed")

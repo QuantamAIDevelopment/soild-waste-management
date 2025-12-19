@@ -79,7 +79,7 @@ class ImprovedClustering:
         road_cluster_votes = {road_id: [0] * n_clusters for road_id in roads['road_id']}
         
         # Vote for road assignments based on house clusters
-        for idx, house in snapped_houses.iterrows():
+        for idx, (df_idx, house) in enumerate(snapped_houses.iterrows()):
             road_id = house['road_id']
             cluster_label = house_labels[idx]
             if road_id in road_cluster_votes:
@@ -106,14 +106,22 @@ class ImprovedClustering:
                 
             cluster_roads_gdf = roads[roads['road_id'].isin(cluster_roads)]
             
-            # Create convex hull of all roads in cluster
-            cluster_geom = unary_union(cluster_roads_gdf.geometry)
-            convex_hull = cluster_geom.convex_hull
+            if cluster_roads_gdf.empty or cluster_roads_gdf.geometry.empty:
+                cluster_zones.append(None)
+                continue
             
-            # Expand hull slightly to include nearby houses
-            expanded_hull = convex_hull.buffer(50)  # 50m buffer
-            
-            cluster_zones.append(expanded_hull)
+            try:
+                # Create convex hull of all roads in cluster
+                cluster_geom = unary_union(cluster_roads_gdf.geometry)
+                convex_hull = cluster_geom.convex_hull
+                
+                # Expand hull slightly to include nearby houses
+                expanded_hull = convex_hull.buffer(50)  # 50m buffer
+                
+                cluster_zones.append(expanded_hull)
+            except Exception as e:
+                logger.warning(f"Failed to create cluster zone: {e}")
+                cluster_zones.append(None)
         
         return cluster_zones
     

@@ -119,8 +119,15 @@ class RouteGeneratorService:
         optimal_clusters = self._calculate_optimal_clusters(total_vehicles)
         
         # Create hierarchical clusters
+        ward_value = None
+        if 'ward' in vehicles_df.columns and not vehicles_df.empty:
+            try:
+                ward_value = vehicles_df['ward'].iloc[0]
+            except (IndexError, KeyError):
+                ward_value = None
+                
         hierarchical_clusters = self.hierarchical_clustering.create_fixed_clusters_by_ward(
-            coordinates, optimal_clusters, vehicles_df.get('ward', {}).iloc[0] if 'ward' in vehicles_df.columns else None
+            coordinates, optimal_clusters, ward_value
         )
         
         # Add vehicle assignments to clusters

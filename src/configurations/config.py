@@ -3,17 +3,25 @@ import os
 
 class Config:
     # SWM API Configuration
-    SWM_API_BASE_URL: str = os.getenv("SWM_API_BASE_URL", "https://swm-main-service-wap-htangag4ghgsfeg4.centralindia-01.azurewebsites.net/")
-    SWM_USERNAME: str = os.getenv("SWM_USERNAME", "swmsuperadmin")
-    SWM_PASSWORD: str = os.getenv("SWM_PASSWORD", "Admin@123")
-    SWM_TOKEN: str = os.getenv("SWM_TOKEN", "")
+    SWM_API_BASE_URL: str = os.getenv("SWM_API_BASE_URL") or ""
     
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "8000"))
-    API_KEY: str = os.getenv("API_KEY", "swm-2024-secure-key")
     
     # External Upload URL
-    EXTERNAL_UPLOAD_URL: str = os.getenv("EXTERNAL_UPLOAD_URL", "https://swm-main-service-wap-htangag4ghgsfeg4.centralindia-01.azurewebsites.net/api/vehicle-routes/upload-data")
+    EXTERNAL_UPLOAD_URL: str = os.getenv("EXTERNAL_UPLOAD_URL") or ""
+    
+    @classmethod
+    def validate(cls):
+        try:
+            required = ["SWM_API_BASE_URL", "EXTERNAL_UPLOAD_URL"]
+            missing = [var for var in required if not getattr(cls, var)]
+            if missing:
+                raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        except AttributeError as e:
+            raise ValueError(f"Configuration error: {e}")
+        except Exception as e:
+            raise ValueError(f"Validation failed: {e}")
     
     # Spatial reference system
     TARGET_CRS: str = "EPSG:3857"  # Web Mercator for distance calculations

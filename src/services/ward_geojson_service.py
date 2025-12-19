@@ -11,13 +11,11 @@ load_dotenv()
 class WardGeoJSONService:
     def __init__(self):
         self.base_url = Config.SWM_API_BASE_URL
-        self.token = Config.SWM_TOKEN
+
         
     def _get_headers(self) -> Dict[str, str]:
-        """Get authorization headers."""
-        token = self.token.strip("'")
+        """Get headers for API (no authentication required)."""
         return {
-            'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
     
@@ -212,6 +210,13 @@ class WardGeoJSONService:
                     }
                 else:
                     logger.warning(f"Missing components - buildings: {buildings_data is not None}, roads: {roads_data is not None}, boundary: {boundary_data is not None}")
+                    # Return boundary data if available, even if buildings/roads are missing
+                    if boundary_data:
+                        return {
+                            'ward_boundary': boundary_data,
+                            'buildings': None,
+                            'roads': None
+                        }
                     return None
             
             # Check if API returns separate fields for buildings, roads, boundary

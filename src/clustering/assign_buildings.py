@@ -252,8 +252,8 @@ class BuildingClusterer:
         summary_data = []
         
         for ward_no, assignment_data in self.ward_vehicle_assignments.items():
-            num_vehicles = assignment_data['num_vehicles']
-            vehicles = assignment_data['vehicles']
+            num_vehicles = assignment_data.get('total_vehicles', 0)
+            vehicles = assignment_data.get('all_vehicles', pd.DataFrame())
             
             # Count buildings per vehicle in this ward
             ward_buildings = buildings_gdf[buildings_gdf.get('ward_no', '') == ward_no]

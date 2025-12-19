@@ -34,12 +34,13 @@ stages:
       displayName: Enable Docker Buildx
 
     - script: |
+        set -e
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
           -t $(acrLoginServer)/$(imageName):$(Build.BuildId) \
           -t $(acrLoginServer)/$(imageName):latest \
           --push \
-          .
+          . || exit 1
       displayName: Build & Push Image
 
     - task: CopyFiles@2

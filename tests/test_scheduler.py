@@ -1,5 +1,6 @@
 """Test script for the SWM Agent scheduler functionality."""
 import asyncio
+import os
 import requests
 import time
 from datetime import datetime
@@ -7,7 +8,7 @@ from loguru import logger
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
-API_KEY = "swm-2024-secure-key"
+API_KEY = os.getenv("SWM_API_KEY", "swm-2024-secure-key")
 
 headers = {
     "Authorization": f"Bearer {API_KEY}",

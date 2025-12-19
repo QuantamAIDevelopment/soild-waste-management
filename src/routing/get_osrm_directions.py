@@ -41,6 +41,10 @@ class OSRMDirectionsProvider:
     
     def _process_osrm_response(self, data: Dict) -> Dict:
         """Process OSRM response and add color coding."""
+        if not data.get('routes') or len(data['routes']) == 0:
+            logger.warning("No routes found in OSRM response")
+            return self._create_empty_response()
+            
         route = data['routes'][0]
         legs = route['legs']
         
