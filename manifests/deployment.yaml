@@ -28,26 +28,11 @@ spec:
                 secretKeyRef:
                   name: swm-route-optimizer-secrets
                   key: SWM_API_BASE_URL
-            - name: SWM_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: swm-route-optimizer-secrets
-                  key: SWM_USERNAME
-            - name: SWM_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: swm-route-optimizer-secrets
-                  key: SWM_PASSWORD
             - name: EXTERNAL_UPLOAD_URL
               valueFrom:
                 secretKeyRef:
                   name: swm-route-optimizer-secrets
                   key: EXTERNAL_UPLOAD_URL
-            - name: DEBUG
-              valueFrom:
-                secretKeyRef:
-                  name: swm-route-optimizer-secrets
-                  key: DEBUG
 
             # Non-secret config
             - name: PORT
