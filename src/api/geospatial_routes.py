@@ -603,7 +603,7 @@ async def get_cluster_roads(cluster_id: int):
         logger.error(f"Error getting cluster roads: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get cluster roads: {str(e)}")
 
-@app.get("/cluster-routes", tags=["clusters"], response_model=List[ClusterRouteResponse])
+@app.post("/cluster-routes", tags=["clusters"], response_model=List[ClusterRouteResponse])
 async def get_cluster_route_coordinates():
     """Get road coordinates for every cluster and upload to external URL.
     
@@ -1705,7 +1705,7 @@ ROOT_HTML_CONTENT = """
         <ul>
             <li><strong>POST /optimize-routes</strong> - Upload files with wardNo and generate optimized routes using live vehicles</li>
             <li><strong>POST /assign-routes-by-vehicle</strong> - Assign routes to specific vehicles (comma-separated IDs) from existing clusters</li>
-            <li><strong>GET /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
+            <li><strong>POST /cluster-routes</strong> - Get road coordinates for every cluster with timestamps</li>
             <li><strong>GET /cluster/{cluster_id}</strong> - Get cluster roads with coordinates for specific cluster</li>
             <li><strong>GET /clusters</strong> - Get cluster roads with coordinates for all clusters</li>
             <li><strong>GET /generate-map/route_map</strong> - View interactive map with layer controls</li>
