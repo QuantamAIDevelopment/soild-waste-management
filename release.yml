@@ -38,10 +38,7 @@ stages:
                 $secretsFile = "$(System.DefaultWorkingDirectory)/secrets.yaml"
                 $content = Get-Content $secretsFile -Raw
                 $content = $content -replace '#{SWM_API_BASE_URL}#', '$(SWM_API_BASE_URL)'
-                $content = $content -replace '#{SWM_USERNAME}#', '$(SWM_USERNAME)'
-                $content = $content -replace '#{SWM_PASSWORD}#', '$(SWM_PASSWORD)'
                 $content = $content -replace '#{EXTERNAL_UPLOAD_URL}#', '$(EXTERNAL_UPLOAD_URL)'
-                $content = $content -replace '#{DEBUG}#', '$(DEBUG)'
                 Set-Content $secretsFile $content
                 Write-Host "Variables replaced in secrets.yaml"
                 Write-Host "Content preview:"
